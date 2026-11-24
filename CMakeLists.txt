@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # 版本号单一真源；打 tag 时 CI 用 -DCLIPMAN_VERSION=<tag 去掉 v> 覆盖。
-set(CLIPMAN_VERSION "0.5.2" CACHE STRING "Clipman 应用版本号")
+set(CLIPMAN_VERSION "0.6.0" CACHE STRING "Clipman 应用版本号")
 
 project(Clipman VERSION ${CLIPMAN_VERSION} LANGUAGES CXX)
 

@@ -69,7 +69,14 @@ bool Store::migrate(QString *error)
     const int version = versionQuery.value(0).toInt();
     versionQuery.finish();
 
-    if (version >= kSchemaVersion)
+    if (version > kSchemaVersion) {
+        setError(error, QStringLiteral("数据版本 %1 高于当前程序支持的 %2，请升级 Clipman 后再打开")
+                            .arg(version)
+                            .arg(kSchemaVersion));
+        return false;
+    }
+
+    if (version == kSchemaVersion)
         return true;
 
     if (!m_db.transaction()) {
@@ -181,40 +188,42 @@ bool Store::addItem(const PreparedItem &item, QString *error)
 
 void Store::prune()
 {
-    QSqlQuery overflow(m_db);
-    overflow.prepare(QStringLiteral("SELECT id, hash, kind FROM entries WHERE id NOT IN "
-                                    "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
-    overflow.addBindValue(kMaxEntries);
-    if (!overflow.exec())
+    if (count() <= kMaxEntries)
         return;
 
-    while (overflow.next()) {
-        if (clipKindFromString(overflow.value(2).toString()) == ClipKind::Image)
-            m_blobs.remove(overflow.value(1).toString());
-    }
-    overflow.finish();
+    struct RemovedEntry
+    {
+        QString hash;
+        ClipKind kind;
+    };
+    QVector<RemovedEntry> removed;
 
+    QSqlQuery overflow(m_db);
+    overflow.prepare(QStringLiteral("SELECT hash, kind FROM entries WHERE id NOT IN "
+                                    "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
+    overflow.addBindValue(kMaxEntries);
+    if (overflow.exec()) {
+        while (overflow.next()) {
+            removed.append(
+                {overflow.value(0).toString(), clipKindFromString(overflow.value(1).toString())});
+        }
+        overflow.finish();
+    }
+
+    // 先删记录：只有数据库删除成功后才删图片文件，避免出现「记录还在、图片已丢」。
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM entries WHERE id NOT IN "
                                  "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
     query.addBindValue(kMaxEntries);
-    query.exec();
-}
-
-void Store::removeBlobFor(qint64 id)
-{
-    QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT hash, kind FROM entries WHERE id = ?"));
-    query.addBindValue(id);
-    if (!query.exec() || !query.next())
+    if (!query.exec()) {
+        qWarning() << "裁剪历史失败，保留图片文件:" << query.lastError().text();
         return;
+    }
 
-    const QString hash = query.value(0).toString();
-    const ClipKind kind = clipKindFromString(query.value(1).toString());
-    query.finish();
-
-    if (kind == ClipKind::Image)
-        m_blobs.remove(hash);
+    for (const RemovedEntry &entry : removed) {
+        if (entry.kind == ClipKind::Image)
+            m_blobs.remove(entry.hash);
+    }
 }
 
 bool Store::entry(qint64 id, Entry *out) const
@@ -331,7 +340,21 @@ QVector<Entry> Store::search(const QString &query, int limit) const
 
 bool Store::removeEntry(qint64 id, QString *error)
 {
-    removeBlobFor(id);
+    QString hash;
+    ClipKind kind = ClipKind::Text;
+    {
+        QSqlQuery lookup(m_db);
+        lookup.prepare(QStringLiteral("SELECT hash, kind FROM entries WHERE id = ?"));
+        lookup.addBindValue(id);
+        if (!lookup.exec()) {
+            setError(error, lookup.lastError().text());
+            return false;
+        }
+        if (lookup.next()) {
+            hash = lookup.value(0).toString();
+            kind = clipKindFromString(lookup.value(1).toString());
+        }
+    }
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM entries WHERE id = ?"));
@@ -340,18 +363,23 @@ bool Store::removeEntry(qint64 id, QString *error)
         setError(error, query.lastError().text());
         return false;
     }
+
+    // 记录删除成功后再清理 blob，避免删除失败时图片先丢。
+    if (kind == ClipKind::Image)
+        m_blobs.remove(hash);
     return true;
 }
 
 bool Store::clearAll(QString *error)
 {
-    m_blobs.clear();
-
     QSqlQuery query(m_db);
     if (!query.exec(QStringLiteral("DELETE FROM entries"))) {
         setError(error, query.lastError().text());
         return false;
     }
+
+    // 记录清空成功后再删文件；失败时保留图片，至少不会出现空记录。
+    m_blobs.clear();
     return true;
 }
 

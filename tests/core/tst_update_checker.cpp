@@ -38,6 +38,24 @@ TEST_CASE("UpdateChecker 解析最新 release 并选中最 deb 资产", "[update
     REQUIRE(info.notes == QStringLiteral("更新说明"));
     REQUIRE(info.debUrl == QUrl(QStringLiteral("https://example.com/clipman_0.4.0_amd64.deb")));
     REQUIRE(info.debSize == 102400);
+    REQUIRE(info.checksumUrl == QUrl(QStringLiteral("https://example.com/clipman.deb.sha256")));
+}
+
+TEST_CASE("UpdateChecker 兼容独立的 checksums.sha256", "[update]")
+{
+    const QByteArray json = R"({
+        "tag_name": "v0.4.1",
+        "assets": [
+            {"name": "clipman_0.4.1_amd64.deb", "size": 2048,
+             "browser_download_url": "https://example.com/clipman_0.4.1_amd64.deb"},
+            {"name": "checksums.sha256", "size": 128,
+             "browser_download_url": "https://example.com/checksums.sha256"}
+        ]
+    })";
+
+    const ReleaseInfo info = UpdateChecker::parseLatestRelease(json);
+    REQUIRE(info.isValid());
+    REQUIRE(info.checksumUrl == QUrl(QStringLiteral("https://example.com/checksums.sha256")));
 }
 
 TEST_CASE("UpdateChecker 对异常响应返回无效结果", "[update]")

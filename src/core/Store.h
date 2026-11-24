@@ -33,7 +33,6 @@ public:
 private:
     bool migrate(QString *error);
     void prune();
-    void removeBlobFor(qint64 id);
 
     QSqlDatabase m_db;
     BlobStore m_blobs;

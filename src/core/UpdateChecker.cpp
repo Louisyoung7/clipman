@@ -1,6 +1,7 @@
 #include "core/UpdateChecker.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -148,7 +149,51 @@ void UpdateChecker::download(const ReleaseInfo &info, const QString &targetPath)
             return;
         }
 
-        emit downloadFinished(m_downloadPath);
+        if (info.checksumUrl.isValid())
+            verifyChecksum(info, m_downloadPath);
+        else
+            emit downloadFinished(m_downloadPath);
+    });
+}
+
+void UpdateChecker::verifyChecksum(const ReleaseInfo &info, const QString &path)
+{
+    QNetworkRequest request(info.checksumUrl);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::NoLessSafeRedirectPolicy);
+    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setTransferTimeout(30000);
+
+    auto *reply = m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path] {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QFile::remove(path);
+            emit downloadFailed(tr("下载校验文件失败：%1").arg(reply->errorString()));
+            return;
+        }
+
+        // sha256sum 输出首列是摘要，忽略后面的文件名。
+        const QByteArray expected = reply->readAll().trimmed().split(' ').value(0).toLower();
+        QFile file(path);
+        if (expected.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+            QFile::remove(path);
+            emit downloadFailed(tr("校验文件无效，更新包已删除"));
+            return;
+        }
+
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        hash.addData(&file);
+        file.close();
+
+        if (hash.result().toHex() != expected) {
+            QFile::remove(path);
+            emit downloadFailed(tr("更新包校验失败，已删除下载文件"));
+            return;
+        }
+
+        emit downloadFinished(path);
     });
 }
 
@@ -190,12 +235,32 @@ ReleaseInfo UpdateChecker::parseLatestRelease(const QByteArray &json)
         info.version.remove(0, 1);
 
     const QJsonArray assets = root.value(QStringLiteral("assets")).toArray();
+    QString debName;
     for (const QJsonValue &value : assets) {
         const QJsonObject asset = value.toObject();
-        if (!asset.value(QStringLiteral("name")).toString().endsWith(QStringLiteral(".deb")))
+        const QString assetName = asset.value(QStringLiteral("name")).toString();
+        if (!assetName.endsWith(QStringLiteral(".deb")))
             continue;
+        debName = assetName;
         info.debUrl = QUrl(asset.value(QStringLiteral("browser_download_url")).toString());
         info.debSize = static_cast<qint64>(asset.value(QStringLiteral("size")).toDouble());
+        break;
+    }
+
+    if (!info.debUrl.isValid() || info.debUrl.isEmpty())
+        return ReleaseInfo();
+
+    // 校验文件可有可无：优先同名 .sha256，其次 checksums.sha256。
+    for (const QJsonValue &value : assets) {
+        const QJsonObject asset = value.toObject();
+        const QString assetName = asset.value(QStringLiteral("name")).toString();
+        const bool matches =
+            assetName == debName + QStringLiteral(".sha256") ||
+            assetName == QStringLiteral("checksums.sha256") ||
+            (assetName.endsWith(QStringLiteral(".sha256")) && assetName.contains(debName));
+        if (!matches)
+            continue;
+        info.checksumUrl = QUrl(asset.value(QStringLiteral("browser_download_url")).toString());
         break;
     }
 

@@ -120,9 +120,14 @@ void SettingsDialog::onUpdateAvailable(const ReleaseInfo &info)
 
 void SettingsDialog::startDownload()
 {
-    const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (cacheDir.isEmpty())
+        cacheDir = QDir::tempPath() + QStringLiteral("/clipman");
+    const QString updateDir = QDir(cacheDir).filePath(QStringLiteral("updates"));
+    QDir().mkpath(updateDir);
+
     m_downloadPath =
-        QDir(tempDir).filePath(QStringLiteral("clipman_%1_amd64.deb").arg(m_pending.version));
+        QDir(updateDir).filePath(QStringLiteral("clipman_%1_amd64.deb").arg(m_pending.version));
     QFile::remove(m_downloadPath);
 
     setBusy(true);

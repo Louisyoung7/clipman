@@ -83,9 +83,18 @@ jobs:
             exit 1
           fi
 
+      - name: 生成校验文件
+        run: |
+          cd build/package
+          sha256sum *.deb > checksums.sha256
+          sha256sum -c checksums.sha256
+          cat checksums.sha256
+
       - name: 上传 deb
         uses: actions/upload-artifact@v4
         with:
           name: clipman-deb
-          path: build/package/*.deb
+          path: |
+            build/package/*.deb
+            build/package/checksums.sha256
           if-no-files-found: error

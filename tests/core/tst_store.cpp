@@ -188,6 +188,32 @@ TEST_CASE("Store::clearAll 清空记录与图片文件", "[store]")
     REQUIRE(QDir(store.blobStore().dir()).entryList(QDir::Files).isEmpty());
 }
 
+TEST_CASE("Store::open 拒绝高于当前 schema 的数据库", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    const QString dbPath = temp.path() + QStringLiteral("/history.db");
+    {
+        QSqlDatabase db =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("future_setup"));
+        db.setDatabaseName(dbPath);
+        REQUIRE(db.open());
+
+        QSqlQuery query(db);
+        REQUIRE(query.exec(QStringLiteral("CREATE TABLE entries (id INTEGER PRIMARY KEY)")));
+        REQUIRE(query.exec(QStringLiteral("PRAGMA user_version = 99")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("future_setup"));
+
+    Store store;
+    QString error;
+    REQUIRE_FALSE(store.open(dbPath, &error));
+    REQUIRE(error.contains(QStringLiteral("高于")));
+    REQUIRE(userVersion(dbPath) == 99);
+}
+
 TEST_CASE("Store 裁剪到最新的 1000 条", "[store]")
 {
     QTemporaryDir temp;

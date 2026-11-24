@@ -17,6 +17,7 @@ struct ReleaseInfo
     QString notes;
     QUrl debUrl;
     qint64 debSize = 0;
+    QUrl checksumUrl;
 
     bool isValid() const;
 };
@@ -47,6 +48,8 @@ signals:
     void downloadFailed(const QString &reason);
 
 private:
+    void verifyChecksum(const ReleaseInfo &info, const QString &path);
+
     QNetworkAccessManager m_network;
     QNetworkReply *m_checkReply = nullptr;
     QNetworkReply *m_downloadReply = nullptr;

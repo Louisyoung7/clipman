@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QByteArray>
 #include <QAbstractNativeEventFilter>
+#include <QByteArray>
 #include <QString>
 
 #include <memory>

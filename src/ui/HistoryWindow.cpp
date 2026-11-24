@@ -140,8 +140,8 @@ void HistoryWindow::refresh()
     if (m_list->count() > 0)
         m_list->setCurrentRow(0);
 
-    m_summary->setText(tr("共 %1 条 · ↑↓ 选择 · Enter 复制 · Delete 删除 · Esc 关闭")
-                           .arg(entries.size()));
+    m_summary->setText(
+        tr("共 %1 条 · ↑↓ 选择 · Enter 复制 · Delete 删除 · Esc 关闭").arg(entries.size()));
 }
 
 void HistoryWindow::showPanel()

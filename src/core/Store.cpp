@@ -119,7 +119,8 @@ bool Store::migrate(QString *error)
 
         if (version < 3) {
             // 旧行自动成为 kind='text'；FTS 外部内容表只索引 text_content，无需 rebuild。
-            sql << QStringLiteral("ALTER TABLE entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
+            sql << QStringLiteral(
+                       "ALTER TABLE entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN mime TEXT")
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN path TEXT")
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN width INTEGER")
@@ -181,9 +182,8 @@ bool Store::addItem(const PreparedItem &item, QString *error)
 void Store::prune()
 {
     QSqlQuery overflow(m_db);
-    overflow.prepare(QStringLiteral(
-        "SELECT id, hash, kind FROM entries WHERE id NOT IN "
-        "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
+    overflow.prepare(QStringLiteral("SELECT id, hash, kind FROM entries WHERE id NOT IN "
+                                    "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
     overflow.addBindValue(kMaxEntries);
     if (!overflow.exec())
         return;
@@ -195,9 +195,8 @@ void Store::prune()
     overflow.finish();
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "DELETE FROM entries WHERE id NOT IN "
-        "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
+    query.prepare(QStringLiteral("DELETE FROM entries WHERE id NOT IN "
+                                 "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
     query.addBindValue(kMaxEntries);
     query.exec();
 }
@@ -224,9 +223,9 @@ bool Store::entry(qint64 id, Entry *out) const
         return false;
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
-        "FROM entries WHERE id = ?"));
+    query.prepare(
+        QStringLiteral("SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
+                       "FROM entries WHERE id = ?"));
     query.addBindValue(id);
     if (!query.exec() || !query.next())
         return false;
@@ -248,9 +247,9 @@ QVector<Entry> Store::recent(int limit) const
     QVector<Entry> entries;
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
-        "FROM entries ORDER BY created_at DESC LIMIT ?"));
+    query.prepare(
+        QStringLiteral("SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
+                       "FROM entries ORDER BY created_at DESC LIMIT ?"));
     query.addBindValue(limit);
     if (!query.exec())
         return entries;

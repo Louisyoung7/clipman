@@ -1,0 +1,21 @@
+include(Catch)
+
+add_executable(tst_core core/main.cpp core/tst_store.cpp core/tst_blobstore.cpp)
+target_link_libraries(tst_core PRIVATE clipman_core Catch2::Catch2 clipman_warnings)
+catch_discover_tests(tst_core)
+
+foreach(name capture_service history_window autostart)
+    qt_add_executable(tst_${name} ui/tst_${name}.cpp)
+    target_include_directories(tst_${name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME tst_${name} COMMAND tst_${name})
+    set_tests_properties(tst_${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endforeach()
+
+# 被测的 UI / 桌面集成源文件直接编进对应测试目标，产品结构不变。
+target_sources(tst_history_window PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/HistoryWindow.cpp)
+target_link_libraries(tst_history_window PRIVATE clipman_core Qt6::Widgets Qt6::Test)
+
+target_sources(tst_autostart PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/Autostart.cpp)
+target_link_libraries(tst_autostart PRIVATE Qt6::Test)
+
+target_link_libraries(tst_capture_service PRIVATE clipman_core Qt6::Concurrent Qt6::Test)

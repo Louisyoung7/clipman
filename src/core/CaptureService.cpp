@@ -1,7 +1,7 @@
 #include "core/CaptureService.h"
 
-#include <QCryptographicHash>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QFutureWatcher>
 #include <QImage>
@@ -78,9 +78,8 @@ PreparedItem process(const ClipboardItem &item, const BlobStore &blobs, qint64 c
         prepared.byteSize = png.size();
         prepared.path = blobs.saveImage(prepared.hash, png);
 
-        const QImage thumbnail =
-            image.scaled(kThumbnailSide, kThumbnailSide, Qt::KeepAspectRatio,
-                         Qt::SmoothTransformation);
+        const QImage thumbnail = image.scaled(kThumbnailSide, kThumbnailSide, Qt::KeepAspectRatio,
+                                              Qt::SmoothTransformation);
         prepared.thumbPath = blobs.saveThumbnail(prepared.hash, encodePng(thumbnail));
 
         prepared.valid = !prepared.path.isEmpty();
@@ -112,7 +111,6 @@ void CaptureService::submit(const ClipboardItem &item)
         if (result.valid)
             emit ready(result);
     });
-    watcher->setFuture(QtConcurrent::run([item, blobs, createdAt] {
-        return process(item, blobs, createdAt);
-    }));
+    watcher->setFuture(
+        QtConcurrent::run([item, blobs, createdAt] { return process(item, blobs, createdAt); }));
 }

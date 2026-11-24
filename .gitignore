@@ -22,3 +22,7 @@ compile_commands.json
 *.o
 *.so
 *.a
+
+# 打包产物
+*.deb
+_CPack_Packages/

@@ -1,0 +1,11 @@
+Checks: >
+  bugprone-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  readability-container-size-empty,
+  readability-else-after-return
+HeaderFilterRegex: '.*/(src|tests)/.*'
+FormatStyle: file

@@ -3,6 +3,7 @@
 #include <QObject>
 
 class HistoryWindow;
+class QAction;
 class QMenu;
 class QSystemTrayIcon;
 
@@ -15,14 +16,17 @@ public:
 
     bool isAvailable() const;
     void show();
+    void setAutostartEnabled(bool enabled);
 
 signals:
     void clearRequested();
     void quitRequested();
     void pauseToggled(bool paused);
+    void autostartToggled(bool enabled);
 
 private:
     HistoryWindow *m_window = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QMenu *m_menu = nullptr;
+    QAction *m_autostartAction = nullptr;
 };

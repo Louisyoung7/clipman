@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Clipman
+Comment=剪贴板历史工具
+Exec=clipman
+Icon=clipman
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

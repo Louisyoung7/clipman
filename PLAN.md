@@ -44,7 +44,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 
 ## 4. 当前状态
 
-首个提交 `2b5864e` 完成最小闭环，**M1 交互可用、M2 多格式与健壮性均已完成**：
+首个提交 `2b5864e` 完成最小闭环，**M1 交互可用、M2 多格式与健壮性、M3 工程化与分发均已完成**：
 
 - ✅ XFixes 监听 + TARGETS 枚举 + INCR，QClipboard 兜底
 - ✅ SQLite 存储：WAL、SHA-256 去重、1000 条裁剪
@@ -57,7 +57,10 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 - ✅ M2：图片落盘 `blobs/<hash>.png` + 缩略图，裁剪/删除/清空同步清理
 - ✅ M2：`QtConcurrent` 异步哈希、图片解码与缩略图
 - ✅ M2：D-Bus 单实例唤醒 + 托盘「暂停记录」
-- ❌ 无测试、无格式化配置、无 `.desktop`、无打包（M3）
+- ✅ M3：`tests/`（Catch2 + QtTest，14 个用例）接入 CTest
+- ✅ M3：`.clang-format` / `.clang-tidy`，`-Wall -Wextra -Wpedantic` 零警告构建
+- ✅ M3：SVG 图标、`.desktop`、`/etc/xdg/autostart` 自启项、托盘「开机自启」开关
+- ✅ M3：CPack 生成 deb（AppImage 按决策延后）
 
 ## 5. 里程碑
 
@@ -90,10 +93,12 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 
 ### M3 工程化与分发（P2）
 
-- [ ] `tests/` + Catch2（`core/`）+ QtTest（`ui/`），`enable_testing()` 接入 CTest
-- [ ] `.clang-format` / `.clang-tidy`，构建零警告
-- [ ] 打包资源：`.desktop` 文件、应用图标、`~/.config/autostart` 自启
-- [ ] Deb 包（`dpkg-buildpackage`），轻量场景补 AppImage
+**已完成。**
+
+- [x] `tests/` + Catch2（`core/`）+ QtTest（`ui/`），`enable_testing()` 接入 CTest
+- [x] `.clang-format` / `.clang-tidy`，构建零警告
+- [x] 打包资源：`.desktop` 文件、应用图标、系统级 `/etc/xdg/autostart` 自启 + 托盘「开机自启」开关（写 `~/.config/autostart`）
+- [x] Deb 包：CPack `DEB` 生成 `clipman_0.1.0_amd64.deb`（`dpkg-buildpackage` 依赖 debhelper，本机不可用；AppImage 按决策延后）
 
 验收：`ctest` 全绿；安装后应用菜单可见、开机自启、卸载不残留数据目录外的文件。
 
@@ -114,6 +119,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 | `Qt6::Concurrent` 已用于图片哈希/缩放 | 大图处理已离开 GUI 线程 | 已解决 |
 | 全局快捷键在 Wayland 受限 | 当前目标平台是 X11，可接受 | 记录在 M4 |
 | 图片以字节哈希去重 | 同一图片经不同编码（PNG/JPEG）会存成两条 | 已接受，M2 范围内不做感知哈希 |
+| deb 基于本机 Qt 6.8.3 构建 | 包只在装有同版本 Qt 的环境可运行（Ubuntu 24.04 官方 Qt 为 6.4.2） | 正式发行需在装有 `qt6-base-dev` 的环境重新打包 |
 
 ## 7. 完成定义（DoD）
 

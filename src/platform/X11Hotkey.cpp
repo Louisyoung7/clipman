@@ -73,7 +73,8 @@ bool X11Hotkey::findKeycode()
         return false;
 
     xcb_get_keyboard_mapping_reply_t *reply = xcb_get_keyboard_mapping_reply(
-        m_conn, xcb_get_keyboard_mapping(m_conn, minKeycode, static_cast<uint16_t>(count)), nullptr);
+        m_conn, xcb_get_keyboard_mapping(m_conn, minKeycode, static_cast<uint16_t>(count)),
+        nullptr);
     if (!reply)
         return false;
 
@@ -110,8 +111,7 @@ bool X11Hotkey::grabAll()
     bool anyGrabbed = false;
     for (quint16 modifier : m_modifiers) {
         const xcb_void_cookie_t cookie = xcb_grab_key_checked(
-            m_conn, 0, m_root, modifier, m_keycode,
-            XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+            m_conn, 0, m_root, modifier, m_keycode, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
         if (xcb_generic_error_t *error = xcb_request_check(m_conn, cookie)) {
             free(error);
         } else {

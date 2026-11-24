@@ -2,8 +2,8 @@
 
 #include <QDBusConnection>
 #include <QDBusMessage>
-#include <QLockFile>
 #include <QDebug>
+#include <QLockFile>
 
 namespace {
 

@@ -2,6 +2,7 @@
 #include <QClipboard>
 #include <QDebug>
 #include <QDir>
+#include <QIcon>
 #include <QImage>
 #include <QMessageBox>
 #include <QMimeData>
@@ -12,6 +13,7 @@
 
 #include "core/CaptureService.h"
 #include "core/Store.h"
+#include "platform/Autostart.h"
 #include "platform/ClipboardSource.h"
 #include "platform/ClipboardWatcher.h"
 #include "platform/SingleInstance.h"
@@ -26,6 +28,8 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("clipman"));
     QApplication::setApplicationName(QStringLiteral("clipman"));
     QApplication::setApplicationDisplayName(QStringLiteral("Clipman"));
+    QApplication::setDesktopFileName(QStringLiteral("clipman"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/clipman.svg")));
     QApplication::setQuitOnLastWindowClosed(false);
 
     const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -59,10 +63,19 @@ int main(int argc, char *argv[])
 
     TrayController tray(&window);
 
+    Autostart autostart;
+    tray.setAutostartEnabled(autostart.isEnabled());
+    QObject::connect(&tray, &TrayController::autostartToggled, &window, [&](bool enabled) {
+        QString autostartError;
+        if (autostart.setEnabled(enabled, &autostartError))
+            return;
+        qWarning() << "设置开机自启失败:" << autostartError;
+        tray.setAutostartEnabled(autostart.isEnabled());
+    });
+
     std::unique_ptr<X11Hotkey> hotkey = X11Hotkey::create();
     if (hotkey) {
-        QObject::connect(hotkey.get(), &X11Hotkey::activated, &window,
-                         &HistoryWindow::togglePanel);
+        QObject::connect(hotkey.get(), &X11Hotkey::activated, &window, &HistoryWindow::togglePanel);
     } else {
         qWarning() << "全局快捷键不可用（仅 X11 支持），请用托盘打开";
     }
@@ -76,13 +89,12 @@ int main(int argc, char *argv[])
                          capture.submit(item);
                      });
 
-    QObject::connect(&capture, &CaptureService::ready, &window,
-                     [&](const PreparedItem &item) {
-                         if (!store.addItem(item, &error))
-                             qWarning() << "写入历史失败:" << error;
-                         if (window.isVisible())
-                             window.refresh();
-                     });
+    QObject::connect(&capture, &CaptureService::ready, &window, [&](const PreparedItem &item) {
+        if (!store.addItem(item, &error))
+            qWarning() << "写入历史失败:" << error;
+        if (window.isVisible())
+            window.refresh();
+    });
 
     QObject::connect(&window, &HistoryWindow::entryActivated, &window, [&](qint64 id) {
         Entry entry;
@@ -118,8 +130,7 @@ int main(int argc, char *argv[])
 
     QObject::connect(&tray, &TrayController::pauseToggled, &window,
                      [&](bool value) { paused = value; });
-    QObject::connect(&single, &SingleInstance::showRequested, &window,
-                     &HistoryWindow::showPanel);
+    QObject::connect(&single, &SingleInstance::showRequested, &window, &HistoryWindow::showPanel);
 
     QObject::connect(&tray, &TrayController::clearRequested, &window, [&] {
         store.clearAll();

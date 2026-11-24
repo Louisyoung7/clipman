@@ -61,8 +61,7 @@ XcbClipboardWatcher::~XcbClipboardWatcher()
 
 bool XcbClipboardWatcher::initialize()
 {
-    const xcb_query_extension_reply_t *extension =
-        xcb_get_extension_data(m_conn, &xcb_xfixes_id);
+    const xcb_query_extension_reply_t *extension = xcb_get_extension_data(m_conn, &xcb_xfixes_id);
     if (!extension || !extension->present)
         return false;
     m_xfixesEventBase = extension->first_event;
@@ -82,10 +81,9 @@ bool XcbClipboardWatcher::initialize()
     m_incrAtom = internAtom("INCR");
     m_propertyAtom = internAtom(kPropertyName);
 
-    if (m_clipboardAtom == XCB_NONE || m_targetsAtom == XCB_NONE || m_utf8Atom == XCB_NONE
-        || m_textPlainAtom == XCB_NONE || m_textPlainUtf8Atom == XCB_NONE
-        || m_uriListAtom == XCB_NONE || m_incrAtom == XCB_NONE
-        || m_propertyAtom == XCB_NONE) {
+    if (m_clipboardAtom == XCB_NONE || m_targetsAtom == XCB_NONE || m_utf8Atom == XCB_NONE ||
+        m_textPlainAtom == XCB_NONE || m_textPlainUtf8Atom == XCB_NONE ||
+        m_uriListAtom == XCB_NONE || m_incrAtom == XCB_NONE || m_propertyAtom == XCB_NONE) {
         return false;
     }
 
@@ -96,12 +94,12 @@ bool XcbClipboardWatcher::initialize()
     m_window = xcb_generate_id(m_conn);
     const uint32_t eventMask = XCB_EVENT_MASK_PROPERTY_CHANGE;
     xcb_create_window(m_conn, 0, m_window, screen.data->root, 0, 0, 1, 1, 0,
-                      XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT,
-                      XCB_CW_EVENT_MASK, &eventMask);
+                      XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK,
+                      &eventMask);
 
-    const uint32_t selectionMask = XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER
-        | XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY
-        | XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE;
+    const uint32_t selectionMask = XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+                                   XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+                                   XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE;
     xcb_xfixes_select_selection_input(m_conn, m_window, m_clipboardAtom, selectionMask);
     xcb_flush(m_conn);
     return true;
@@ -164,8 +162,7 @@ bool XcbClipboardWatcher::nativeEventFilter(const QByteArray &eventType, void *m
 xcb_atom_t XcbClipboardWatcher::internAtom(const char *name) const
 {
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(
-        m_conn,
-        xcb_intern_atom(m_conn, 0, static_cast<uint16_t>(std::strlen(name)), name),
+        m_conn, xcb_intern_atom(m_conn, 0, static_cast<uint16_t>(std::strlen(name)), name),
         nullptr);
     if (!reply)
         return XCB_NONE;
@@ -216,8 +213,7 @@ void XcbClipboardWatcher::handleXfixesEvent(const xcb_xfixes_selection_notify_ev
     }
 
     // 同一个 owner 的同一次取权可能重复上报；传输中直接忽略，避免打断进行中的请求。
-    if (event->owner == m_owner
-        && (event->timestamp == m_ownerTime || m_state != State::Idle)) {
+    if (event->owner == m_owner && (event->timestamp == m_ownerTime || m_state != State::Idle)) {
         return;
     }
 
@@ -240,8 +236,8 @@ void XcbClipboardWatcher::handleXfixesEvent(const xcb_xfixes_selection_notify_ev
 
 void XcbClipboardWatcher::handleSelectionNotify(const xcb_selection_notify_event_t *event)
 {
-    if (event->requestor != m_window || event->selection != m_clipboardAtom
-        || m_state == State::Idle) {
+    if (event->requestor != m_window || event->selection != m_clipboardAtom ||
+        m_state == State::Idle) {
         return;
     }
 
@@ -363,8 +359,8 @@ void XcbClipboardWatcher::emitCollected(const QByteArray &raw)
     if (data.isEmpty())
         return;
 
-    if (target == m_pngAtom || target == m_jpegAtom || target == m_bmpAtom
-        || target == m_tiffAtom) {
+    if (target == m_pngAtom || target == m_jpegAtom || target == m_bmpAtom ||
+        target == m_tiffAtom) {
         ClipboardItem item;
         item.kind = ClipKind::Image;
         item.mime = mime;
@@ -436,11 +432,11 @@ void XcbClipboardWatcher::reset()
 
 QByteArray XcbClipboardWatcher::readProperty(xcb_atom_t *type) const
 {
-    xcb_get_property_reply_t *reply = xcb_get_property_reply(
-        m_conn,
-        xcb_get_property(m_conn, 1, m_window, m_propertyAtom, XCB_GET_PROPERTY_TYPE_ANY, 0,
-                         0x400000),
-        nullptr);
+    xcb_get_property_reply_t *reply =
+        xcb_get_property_reply(m_conn,
+                               xcb_get_property(m_conn, 1, m_window, m_propertyAtom,
+                                                XCB_GET_PROPERTY_TYPE_ANY, 0, 0x400000),
+                               nullptr);
     if (!reply)
         return {};
 

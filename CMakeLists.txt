@@ -21,6 +21,8 @@ qt_add_executable(clipman
     src/platform/ClipboardSource.h
     src/platform/ClipboardWatcher.h
     src/platform/ClipboardWatcher.cpp
+    src/platform/X11Hotkey.h
+    src/platform/X11Hotkey.cpp
     src/platform/XcbClipboardWatcher.h
     src/platform/XcbClipboardWatcher.cpp
     src/ui/HistoryWindow.h

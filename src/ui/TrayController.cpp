@@ -56,12 +56,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
     QAction *quitAction = m_menu->addAction(tr("退出"));
     m_tray->setContextMenu(m_menu);
 
-    connect(showAction, &QAction::triggered, this, [this] {
-        m_window->refresh();
-        m_window->show();
-        m_window->raise();
-        m_window->activateWindow();
-    });
+    connect(showAction, &QAction::triggered, this, [this] { m_window->showPanel(); });
     connect(clearAction, &QAction::triggered, this, &TrayController::clearRequested);
     connect(quitAction, &QAction::triggered, this, &TrayController::quitRequested);
 
@@ -69,14 +64,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
             [this](QSystemTrayIcon::ActivationReason reason) {
                 if (reason != QSystemTrayIcon::Trigger && reason != QSystemTrayIcon::DoubleClick)
                     return;
-                if (m_window->isVisible()) {
-                    m_window->hide();
-                } else {
-                    m_window->refresh();
-                    m_window->show();
-                    m_window->raise();
-                    m_window->activateWindow();
-                }
+                m_window->togglePanel();
             });
 }
 

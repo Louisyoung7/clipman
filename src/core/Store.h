@@ -17,9 +17,11 @@ public:
 
     bool open(const QString &dbPath, QString *error = nullptr);
     bool addText(const QString &text, QString *error = nullptr);
+    bool removeEntry(qint64 id, QString *error = nullptr);
     bool clearAll(QString *error = nullptr);
 
     QVector<Entry> recent(int limit = 200) const;
+    QVector<Entry> search(const QString &query, int limit = 200) const;
     int count() const;
 
 private:

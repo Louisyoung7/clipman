@@ -11,6 +11,7 @@
 #include "core/Store.h"
 #include "platform/ClipboardSource.h"
 #include "platform/ClipboardWatcher.h"
+#include "platform/X11Hotkey.h"
 #include "platform/XcbClipboardWatcher.h"
 #include "ui/HistoryWindow.h"
 #include "ui/TrayController.h"
@@ -53,6 +54,14 @@ int main(int argc, char *argv[])
 
     TrayController tray(&window);
 
+    std::unique_ptr<X11Hotkey> hotkey = X11Hotkey::create();
+    if (hotkey) {
+        QObject::connect(hotkey.get(), &X11Hotkey::activated, &window,
+                         &HistoryWindow::togglePanel);
+    } else {
+        qWarning() << "全局快捷键不可用（仅 X11 支持），请用托盘打开";
+    }
+
     QObject::connect(source.get(), &ClipboardSource::textCaptured, &window,
                      [&](const QString &text) {
                          if (!store.addText(text, &error))
@@ -79,7 +88,7 @@ int main(int argc, char *argv[])
         tray.show();
     } else {
         qWarning() << "系统托盘不可用，改为直接显示主窗口";
-        window.show();
+        window.showPanel();
     }
 
     return app.exec();

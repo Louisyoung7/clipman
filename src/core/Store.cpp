@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 #include <QSqlError>
@@ -11,7 +12,7 @@
 namespace {
 
 constexpr int kMaxEntries = 1000;
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 void setError(QString *error, const QString &message)
 {
@@ -72,18 +73,49 @@ bool Store::migrate(QString *error)
         return false;
     }
 
-    const QStringList statements = {
-        QStringLiteral("CREATE TABLE IF NOT EXISTS entries ("
-                       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                       "  hash TEXT NOT NULL UNIQUE,"
-                       "  text_content TEXT,"
-                       "  byte_size INTEGER NOT NULL DEFAULT 0,"
-                       "  created_at INTEGER NOT NULL"
-                       ")"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_entries_created_at "
-                       "ON entries(created_at DESC)"),
-        QStringLiteral("PRAGMA user_version = 1"),
-    };
+    const QStringList statements = [version] {
+        QStringList sql;
+
+        if (version < 1) {
+            sql << QStringLiteral("CREATE TABLE IF NOT EXISTS entries ("
+                                  "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                  "  hash TEXT NOT NULL UNIQUE,"
+                                  "  text_content TEXT,"
+                                  "  byte_size INTEGER NOT NULL DEFAULT 0,"
+                                  "  created_at INTEGER NOT NULL"
+                                  ")")
+                << QStringLiteral("CREATE INDEX IF NOT EXISTS idx_entries_created_at "
+                                  "ON entries(created_at DESC)");
+        }
+
+        if (version < 2) {
+            sql << QStringLiteral("CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5("
+                                  "  text_content, content='entries', content_rowid='id',"
+                                  "  tokenize='unicode61'"
+                                  ")")
+                << QStringLiteral("CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries "
+                                  "BEGIN "
+                                  "  INSERT INTO entries_fts(rowid, text_content) "
+                                  "  VALUES (new.id, new.text_content); "
+                                  "END")
+                << QStringLiteral("CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries "
+                                  "BEGIN "
+                                  "  INSERT INTO entries_fts(entries_fts, rowid, text_content) "
+                                  "  VALUES ('delete', old.id, old.text_content); "
+                                  "END")
+                << QStringLiteral("CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries "
+                                  "BEGIN "
+                                  "  INSERT INTO entries_fts(entries_fts, rowid, text_content) "
+                                  "  VALUES ('delete', old.id, old.text_content); "
+                                  "  INSERT INTO entries_fts(rowid, text_content) "
+                                  "  VALUES (new.id, new.text_content); "
+                                  "END")
+                << QStringLiteral("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')");
+        }
+
+        sql << QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion);
+        return sql;
+    }();
 
     QSqlQuery ddl(m_db);
     for (const QString &statement : statements) {
@@ -159,6 +191,71 @@ QVector<Entry> Store::recent(int limit) const
         entries.append(entry);
     }
     return entries;
+}
+
+QVector<Entry> Store::search(const QString &query, int limit) const
+{
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty())
+        return recent(limit);
+
+    QStringList parts;
+    const QStringList tokens = trimmed.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString &token : tokens) {
+        bool hasContent = false;
+        for (const QChar ch : token) {
+            if (ch.isLetterOrNumber()) {
+                hasContent = true;
+                break;
+            }
+        }
+        if (!hasContent)
+            continue;
+
+        QString escaped = token;
+        escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+        parts << QStringLiteral("\"%1\"*").arg(escaped);
+    }
+
+    if (parts.isEmpty())
+        return recent(limit);
+
+    QVector<Entry> entries;
+
+    QSqlQuery ftsQuery(m_db);
+    ftsQuery.prepare(QStringLiteral(
+        "SELECT e.id, e.hash, e.text_content, e.created_at "
+        "FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid "
+        "WHERE entries_fts MATCH ? "
+        "ORDER BY rank LIMIT ?"));
+    ftsQuery.addBindValue(parts.join(QLatin1Char(' ')));
+    ftsQuery.addBindValue(limit);
+    if (!ftsQuery.exec()) {
+        qWarning() << "FTS 查询失败，回退到最近记录:" << ftsQuery.lastError().text();
+        return recent(limit);
+    }
+
+    while (ftsQuery.next()) {
+        Entry entry;
+        entry.id = ftsQuery.value(0).toLongLong();
+        entry.hash = ftsQuery.value(1).toString();
+        entry.text = ftsQuery.value(2).toString();
+        entry.createdAt = ftsQuery.value(3).toLongLong();
+        entries.append(entry);
+    }
+    return entries;
+}
+
+bool Store::removeEntry(qint64 id, QString *error)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM entries WHERE id = ?"));
+    query.addBindValue(id);
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    return true;
 }
 
 bool Store::clearAll(QString *error)

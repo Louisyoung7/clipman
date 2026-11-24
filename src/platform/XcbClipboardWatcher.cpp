@@ -116,9 +116,10 @@ void XcbClipboardWatcher::start()
         requestTargets();
 }
 
-void XcbClipboardWatcher::suppressNext(const QString &)
+void XcbClipboardWatcher::suppressNext(const QString &text)
 {
-    // 自己成为 selection owner 时由 ownsClipboard() 过滤，这里无需额外状态。
+    // 回填后 selection 会以自身为 owner 再触发一次监听；记录文本让 finishTransfer() 跳过回响。
+    m_lastText = text;
 }
 
 bool XcbClipboardWatcher::nativeEventFilter(const QByteArray &eventType, void *message,
@@ -200,11 +201,14 @@ void XcbClipboardWatcher::handleXfixesEvent(const xcb_xfixes_selection_notify_ev
         return;
     }
 
+    // 自身回填也会产生 SET_SELECTION_OWNER；先同步 owner 记账再决定是否抓取，
+    // 避免 m_owner 停留在上一任 owner 导致后续判断失准。
+    m_owner = event->owner;
+    m_ownerTime = event->timestamp;
+
     if (QGuiApplication::clipboard()->ownsClipboard())
         return;
 
-    m_owner = event->owner;
-    m_ownerTime = event->timestamp;
     requestTargets();
 }
 

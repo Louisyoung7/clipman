@@ -11,11 +11,15 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
-#include <QPushButton>
 #include <QScreen>
 #include <QVBoxLayout>
 
 #include "core/Store.h"
+
+namespace {
+constexpr int kCollapsedTextChars = 120;
+constexpr int kExpandedTextChars = 2000;
+}
 
 HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     : QWidget(parent)
@@ -30,21 +34,45 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     m_search->setClearButtonEnabled(true);
 
     m_list = new QListWidget(this);
-    m_list->setAlternatingRowColors(true);
+    m_list->setAlternatingRowColors(false);
     m_list->setTextElideMode(Qt::ElideRight);
+    m_list->setWordWrap(true);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_list->setFocusPolicy(Qt::NoFocus);
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     m_list->setIconSize(QSize(64, 64));
+    m_list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_list->setStyleSheet(QStringLiteral(
+        "QListWidget {"
+        "  border: none;"
+        "  background: transparent;"
+        "  outline: none;"
+        "}"
+        "QListWidget::item {"
+        "  background: #f7f8fa;"
+        "  border: 1px solid #e4e7ec;"
+        "  border-radius: 7px;"
+        "  padding: 8px 10px;"
+        "  margin: 5px 3px;"
+        "  color: #202124;"
+        "}"
+        "QListWidget::item:hover {"
+        "  background: #eef1f6;"
+        "  border-color: #d3d8e0;"
+        "}"
+        "QListWidget::item:selected {"
+        "  background: #e8f0fe;"
+        "  border-color: #9dc0f7;"
+        "  color: #1a1a1a;"
+        "}"));
 
     m_summary = new QLabel(this);
-    auto *clearButton = new QPushButton(tr("清空"), this);
 
     auto *footer = new QHBoxLayout;
     footer->addWidget(m_summary);
     footer->addStretch();
-    footer->addWidget(clearButton);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(m_search);
@@ -53,8 +81,8 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
 
     connect(m_search, &QLineEdit::textChanged, this, &HistoryWindow::refresh);
 
-    connect(m_list, &QListWidget::itemClicked, this, &HistoryWindow::activateCurrent);
-    connect(m_list, &QListWidget::itemActivated, this, &HistoryWindow::activateCurrent);
+    connect(m_list, &QListWidget::itemClicked, this, &HistoryWindow::toggleTextExpansion);
+    connect(m_list, &QListWidget::itemDoubleClicked, this, &HistoryWindow::activateCurrent);
     connect(m_list, &QListWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
         QListWidgetItem *item = m_list->itemAt(pos);
         if (!item)
@@ -71,20 +99,13 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
             deleteCurrent();
     });
 
-    connect(clearButton, &QPushButton::clicked, this, [this] {
-        m_store.clearAll();
-        m_thumbCache.clear();
-        refresh();
-        emit cleared();
-    });
-
     m_search->installEventFilter(this);
     m_list->installEventFilter(this);
 
     refresh();
 }
 
-QString HistoryWindow::entryLabel(const Entry &entry) const
+QString HistoryWindow::entryLabel(const Entry &entry, bool expanded) const
 {
     const QString stamp =
         QDateTime::fromMSecsSinceEpoch(entry.createdAt).toString(QStringLiteral("MM-dd HH:mm:ss"));
@@ -99,7 +120,40 @@ QString HistoryWindow::entryLabel(const Entry &entry) const
     case ClipKind::Text:
         break;
     }
-    return tr("%1  %2").arg(stamp, entry.text.simplified());
+
+    QString text = entry.text.simplified();
+    const int limit = expanded ? kExpandedTextChars : kCollapsedTextChars;
+    if (text.size() > limit)
+        text = text.left(limit) + QStringLiteral("…");
+    return tr("%1  %2").arg(stamp, text);
+}
+
+const Entry *HistoryWindow::entryById(qint64 id) const
+{
+    for (const Entry &entry : m_entries) {
+        if (entry.id == id)
+            return &entry;
+    }
+    return nullptr;
+}
+
+void HistoryWindow::toggleTextExpansion(QListWidgetItem *item)
+{
+    if (!item)
+        return;
+
+    const qint64 id = item->data(Qt::UserRole + 1).toLongLong();
+    const Entry *entry = entryById(id);
+    if (!entry || entry->kind != ClipKind::Text)
+        return;
+    if (entry->text.simplified().size() <= kCollapsedTextChars)
+        return;
+
+    const bool expanded = m_expandedId != id;
+    m_expandedId = expanded ? id : -1;
+    item->setText(entryLabel(*entry, expanded));
+    m_list->doItemsLayout();
+    m_list->scrollToItem(item);
 }
 
 QPixmap HistoryWindow::thumbnail(const Entry &entry)
@@ -116,22 +170,18 @@ QPixmap HistoryWindow::thumbnail(const Entry &entry)
 void HistoryWindow::refresh()
 {
     const QString query = m_search ? m_search->text() : QString();
-    const QVector<Entry> entries = m_store.search(query);
+    m_entries = m_store.search(query);
+    m_expandedId = -1;
 
     m_list->clear();
-    for (const Entry &entry : entries) {
-        auto *item = new QListWidgetItem(entryLabel(entry));
+    for (const Entry &entry : m_entries) {
+        auto *item = new QListWidgetItem(entryLabel(entry, false));
         item->setData(Qt::UserRole + 1, entry.id);
 
         if (entry.kind == ClipKind::Image) {
             const QPixmap pixmap = thumbnail(entry);
             if (!pixmap.isNull())
                 item->setIcon(QIcon(pixmap));
-            item->setToolTip(entry.path);
-        } else if (entry.kind == ClipKind::Files) {
-            item->setToolTip(entry.text);
-        } else {
-            item->setToolTip(entry.text.left(5000));
         }
 
         m_list->addItem(item);
@@ -141,7 +191,8 @@ void HistoryWindow::refresh()
         m_list->setCurrentRow(0);
 
     m_summary->setText(
-        tr("共 %1 条 · ↑↓ 选择 · Enter 复制 · Delete 删除 · Esc 关闭").arg(entries.size()));
+        tr("共 %1 条 · 单击选中/展开长文本 · 双击或 Enter 复制 · Delete 删除 · Esc 关闭")
+            .arg(m_entries.size()));
 }
 
 void HistoryWindow::showPanel()

@@ -27,6 +27,7 @@ public:
     using HotkeyApplier = std::function<bool(const QString &sequence, QString *error)>;
 
     explicit SettingsDialog(QWidget *parent = nullptr, HotkeyApplier hotkeyApplier = {});
+    ~SettingsDialog() override;
 
 protected:
     void done(int result) override;

@@ -71,9 +71,10 @@ int main(int argc, char *argv[])
     TrayController tray(&window);
 
     std::unique_ptr<X11Hotkey> hotkey = X11Hotkey::create();
+    std::unique_ptr<X11Hotkey> settingsHotkey = X11Hotkey::create();
 
-    auto applyHotkey = [&](const QString &sequence, QString *hotkeyError) -> bool {
-        if (!hotkey) {
+    auto applyTo = [](X11Hotkey *target, const QString &sequence, QString *hotkeyError) -> bool {
+        if (!target) {
             if (hotkeyError)
                 *hotkeyError = QStringLiteral("当前环境不支持 X11 全局快捷键");
             return false;
@@ -81,7 +82,11 @@ int main(int argc, char *argv[])
         HotkeySpec spec;
         if (!HotkeySpec::parse(sequence, &spec, hotkeyError))
             return false;
-        return hotkey->apply(spec, hotkeyError);
+        return target->apply(spec, hotkeyError);
+    };
+
+    auto applyHotkey = [&](const QString &sequence, QString *hotkeyError) -> bool {
+        return applyTo(hotkey.get(), sequence, hotkeyError);
     };
 
     const QString savedHotkey =
@@ -93,6 +98,11 @@ int main(int argc, char *argv[])
         qWarning() << "全局快捷键不可用:" << hotkeyError; // 不静默改写用户配置
     if (hotkey)
         QObject::connect(hotkey.get(), &X11Hotkey::activated, &window, &HistoryWindow::togglePanel);
+
+    QString settingsHotkeyError;
+    if (!applyTo(settingsHotkey.get(), QString::fromLatin1(kDefaultSettingsHotkeySequence),
+                 &settingsHotkeyError))
+        qWarning() << "设置快捷键不可用:" << settingsHotkeyError;
 
     bool paused = false;
 
@@ -150,10 +160,18 @@ int main(int argc, char *argv[])
         store.clearAll();
         window.refresh();
     });
-    QObject::connect(&tray, &TrayController::settingsRequested, &window, [&] {
-        // 先释放自身的 grab，否则旧快捷键会抢走录制时的按键事件。
+    auto openSettings = [&] {
+        // 已有模态窗口（设置界面）时忽略重复触发，避免叠出多个对话框。
+        if (QApplication::activeModalWidget())
+            return;
+
+        // 先释放两个全局 grab，否则录制快捷键时按键仍会被抢走。
         if (hotkey)
             hotkey->release();
+        if (settingsHotkey)
+            settingsHotkey->release();
+        if (window.isVisible())
+            window.hide();
 
         SettingsDialog dialog(&window, applyHotkey);
         dialog.exec();
@@ -167,6 +185,11 @@ int main(int argc, char *argv[])
         if (!applyHotkey(sequence, &restoreError))
             qWarning() << "全局快捷键恢复失败:" << restoreError;
 
+        QString settingsRestoreError;
+        if (!applyTo(settingsHotkey.get(), QString::fromLatin1(kDefaultSettingsHotkeySequence),
+                     &settingsRestoreError))
+            qWarning() << "设置快捷键恢复失败:" << settingsRestoreError;
+
         const int retention = QSettings()
                                   .value(QStringLiteral("history/maxEntries"),
                                          Store::kDefaultRetention)
@@ -175,7 +198,10 @@ int main(int argc, char *argv[])
             store.setMaxEntries(retention);
             window.refresh();
         }
-    });
+    };
+    QObject::connect(&tray, &TrayController::settingsRequested, &window, openSettings);
+    if (settingsHotkey)
+        QObject::connect(settingsHotkey.get(), &X11Hotkey::activated, &window, openSettings);
     QObject::connect(&tray, &TrayController::quitRequested, &app, &QApplication::quit);
 
     source->start();

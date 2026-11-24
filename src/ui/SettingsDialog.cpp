@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QNetworkProxyFactory>
 #include <QNetworkProxyQuery>
 #include <QProcess>
@@ -218,6 +219,14 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
         setStatus(reason);
         QMessageBox::warning(this, tr("下载失败"), reason);
     });
+
+    // 用于「点击设置界面外部自动关闭」：需要监听整个应用的事件。
+    qApp->installEventFilter(this);
+}
+
+SettingsDialog::~SettingsDialog()
+{
+    qApp->removeEventFilter(this);
 }
 
 void SettingsDialog::done(int result)
@@ -248,7 +257,32 @@ bool SettingsDialog::eventFilter(QObject *watched, QEvent *event)
         default:
             break;
         }
+        return QDialog::eventFilter(watched, event);
     }
+
+    if (watched == qApp && isVisible() && !m_busy) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            // 有子对话框（消息框等）或下拉弹窗打开时，不把点击外部当作关闭操作。
+            QWidget *modal = QApplication::activeModalWidget();
+            if (modal && modal != this)
+                return QDialog::eventFilter(watched, event);
+
+            auto *mouseEvent = static_cast<QMouseEvent *>(event);
+            const QPoint globalPos = mouseEvent->globalPosition().toPoint();
+            if (frameGeometry().contains(globalPos))
+                return QDialog::eventFilter(watched, event);
+
+            QWidget *popup = QApplication::activePopupWidget();
+            if (popup && popup->frameGeometry().contains(globalPos))
+                return QDialog::eventFilter(watched, event);
+
+            done(QDialog::Rejected);
+        } else if (event->type() == QEvent::ApplicationDeactivate) {
+            // 点击本应用之外的窗口时，视作关闭设置界面。
+            done(QDialog::Rejected);
+        }
+    }
+
     return QDialog::eventFilter(watched, event);
 }
 

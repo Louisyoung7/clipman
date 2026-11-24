@@ -19,4 +19,11 @@ target_link_libraries(tst_history_window PRIVATE clipman_core Qt6::Widgets Qt6::
 target_sources(tst_autostart PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/Autostart.cpp)
 target_link_libraries(tst_autostart PRIVATE Qt6::Test)
 
+# HotkeySpec 是纯逻辑（只依赖 QtGui），单独注册，不需要 offscreen 平台。
+qt_add_executable(tst_hotkey_spec platform/tst_hotkey_spec.cpp)
+target_include_directories(tst_hotkey_spec PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_sources(tst_hotkey_spec PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/HotkeySpec.cpp)
+target_link_libraries(tst_hotkey_spec PRIVATE Qt6::Gui Qt6::Test)
+add_test(NAME tst_hotkey_spec COMMAND tst_hotkey_spec)
+
 target_link_libraries(tst_capture_service PRIVATE clipman_core Qt6::Concurrent Qt6::Test)

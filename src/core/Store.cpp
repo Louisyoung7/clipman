@@ -10,7 +10,6 @@
 
 namespace {
 
-constexpr int kMaxEntries = 1000;
 constexpr int kSchemaVersion = 3;
 
 void setError(QString *error, const QString &message)
@@ -186,9 +185,15 @@ bool Store::addItem(const PreparedItem &item, QString *error)
     return true;
 }
 
+void Store::setMaxEntries(int entries)
+{
+    m_maxEntries = qBound(kMinRetention, entries, kMaxRetention);
+    prune();
+}
+
 void Store::prune()
 {
-    if (count() <= kMaxEntries)
+    if (count() <= m_maxEntries)
         return;
 
     struct RemovedEntry
@@ -201,7 +206,7 @@ void Store::prune()
     QSqlQuery overflow(m_db);
     overflow.prepare(QStringLiteral("SELECT hash, kind FROM entries WHERE id NOT IN "
                                     "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
-    overflow.addBindValue(kMaxEntries);
+    overflow.addBindValue(m_maxEntries);
     if (overflow.exec()) {
         while (overflow.next()) {
             removed.append(
@@ -214,7 +219,7 @@ void Store::prune()
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM entries WHERE id NOT IN "
                                  "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
-    query.addBindValue(kMaxEntries);
+    query.addBindValue(m_maxEntries);
     if (!query.exec()) {
         qWarning() << "裁剪历史失败，保留图片文件:" << query.lastError().text();
         return;

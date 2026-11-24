@@ -8,6 +8,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -21,6 +22,9 @@
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
+#include "core/Store.h"
+#include "platform/HotkeySpec.h"
+
 namespace {
 
 constexpr auto kRepoOwner = "Louisyoung7";
@@ -28,8 +32,9 @@ constexpr auto kRepoName = "clipman";
 
 } // namespace
 
-SettingsDialog::SettingsDialog(QWidget *parent)
+SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
     : QDialog(parent)
+    , m_hotkeyApplier(hotkeyApplier)
 {
     setWindowTitle(tr("Clipman 设置"));
     setMinimumWidth(460);
@@ -38,8 +43,26 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     auto *generalGroup = new QGroupBox(tr("通用"), this);
     auto *generalLayout = new QVBoxLayout(generalGroup);
+    auto *generalForm = new QFormLayout;
+
     m_autostartCheck = new QCheckBox(tr("开机时自动启动 Clipman"), generalGroup);
-    generalLayout->addWidget(m_autostartCheck);
+    generalForm->addRow(m_autostartCheck);
+
+    m_retentionSpin = new QSpinBox(generalGroup);
+    m_retentionSpin->setRange(Store::kMinRetention, Store::kMaxRetention);
+    m_retentionSpin->setSingleStep(100);
+    m_retentionSpin->setSuffix(tr(" 条"));
+    generalForm->addRow(tr("保留条数"), m_retentionSpin);
+
+    m_hotkeyEdit = new QKeySequenceEdit(generalGroup);
+    generalForm->addRow(tr("全局快捷键"), m_hotkeyEdit);
+    generalLayout->addLayout(generalForm);
+
+    auto *hotkeyHint =
+        new QLabel(tr("需包含 Ctrl / Alt / Super，仅支持单组组合键；系统或其他应用已占用的组合无法录制，请换一个空闲组合。"),
+                   generalGroup);
+    hotkeyHint->setWordWrap(true);
+    generalLayout->addWidget(hotkeyHint);
     layout->addWidget(generalGroup);
 
     auto *updateGroup = new QGroupBox(tr("更新"), this);
@@ -102,6 +125,23 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         m_autostartCheck->setChecked(!enabled);
     });
 
+    connect(m_hotkeyEdit, &QKeySequenceEdit::keySequenceChanged, this,
+            [this](const QKeySequence &sequence) {
+                // Qt 6.4 没有 setMaximumSequenceLength()，手动截断为单组组合键。
+                if (sequence.count() <= 1)
+                    return;
+                const QSignalBlocker blocker(m_hotkeyEdit);
+                m_hotkeyEdit->setKeySequence(QKeySequence(sequence[0]));
+            });
+    connect(m_hotkeyEdit, &QKeySequenceEdit::editingFinished, this, [this] {
+        const QString sequence =
+            m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+        if (sequence == m_appliedSequence)
+            return;
+        if (!applyHotkeySequence(sequence))
+            restoreHotkeyEdit();
+    });
+
     loadSettings();
 
     m_checker = new UpdateChecker(this);
@@ -139,8 +179,53 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
 void SettingsDialog::done(int result)
 {
+    // 兜底：用户在完成计时器触发前就关闭对话框时，仍同步校验并应用最后一次修改。
+    const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+    if (sequence != m_appliedSequence && !applyHotkeySequence(sequence))
+        restoreHotkeyEdit();
+
     saveSettings();
     QDialog::done(result);
+}
+
+bool SettingsDialog::applyHotkeySequence(const QString &sequence)
+{
+    // 没有按下有效组合（例如点进输入框后直接失焦）时静默还原，不弹窗打扰。
+    if (sequence.isEmpty()) {
+        restoreHotkeyEdit();
+        return false;
+    }
+
+    if (m_hotkeyApplier) {
+        QString error;
+        if (!m_hotkeyApplier(sequence, &error)) {
+            if (error.isEmpty())
+                error = tr("组合键「%1」不可用。").arg(sequence);
+
+            QMessageBox box(this);
+            box.setWindowTitle(tr("快捷键不可用"));
+            box.setIcon(QMessageBox::Warning);
+            box.setText(error);
+            box.setInformativeText(
+                m_appliedSequence.isEmpty()
+                    ? tr("请换一个组合键，例如 Ctrl+Alt+V。")
+                    : tr("请换一个组合键；当前仍使用「%1」。").arg(m_appliedSequence));
+            box.setStandardButtons(QMessageBox::Ok);
+            box.button(QMessageBox::Ok)->setText(tr("知道了"));
+            box.exec();
+            return false;
+        }
+    }
+
+    m_appliedSequence = sequence;
+    return true;
+}
+
+void SettingsDialog::restoreHotkeyEdit()
+{
+    const QSignalBlocker blocker(m_hotkeyEdit);
+    m_hotkeyEdit->setKeySequence(
+        QKeySequence::fromString(m_appliedSequence, QKeySequence::PortableText));
 }
 
 void SettingsDialog::loadSettings()
@@ -161,6 +246,19 @@ void SettingsDialog::loadSettings()
             .toString());
     m_proxyPort->setValue(settings.value(QStringLiteral("network/proxyPort"), 7890).toInt());
 
+    m_retentionSpin->setValue(
+        settings.value(QStringLiteral("history/maxEntries"), Store::kDefaultRetention).toInt());
+
+    m_appliedSequence =
+        settings.value(QStringLiteral("hotkey/sequence"),
+                       QString::fromLatin1(kDefaultHotkeySequence))
+            .toString();
+    {
+        const QSignalBlocker blocker(m_hotkeyEdit);
+        m_hotkeyEdit->setKeySequence(
+            QKeySequence::fromString(m_appliedSequence, QKeySequence::PortableText));
+    }
+
     updateProxyControls();
     const QSignalBlocker blocker(m_autostartCheck);
     m_autostartCheck->setChecked(m_autostart.isEnabled());
@@ -173,6 +271,9 @@ void SettingsDialog::saveSettings()
     settings.setValue(QStringLiteral("network/proxyType"), m_proxyType->currentData().toString());
     settings.setValue(QStringLiteral("network/proxyHost"), m_proxyHost->text().trimmed());
     settings.setValue(QStringLiteral("network/proxyPort"), m_proxyPort->value());
+    settings.setValue(QStringLiteral("history/maxEntries"), m_retentionSpin->value());
+    // 只保存已成功应用的序列，避免把校验失败的键位写进配置。
+    settings.setValue(QStringLiteral("hotkey/sequence"), m_appliedSequence);
     settings.sync();
 }
 

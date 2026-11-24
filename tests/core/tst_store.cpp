@@ -234,3 +234,42 @@ TEST_CASE("Store 裁剪到最新的 1000 条", "[store]")
     for (const Entry &entry : entries)
         REQUIRE(entry.hash != QStringLiteral("h0"));
 }
+
+TEST_CASE("Store::setMaxEntries 立即裁剪到新上限", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+
+    for (int i = 0; i < 105; ++i) {
+        const QString hash = QStringLiteral("h%1").arg(i);
+        REQUIRE(store.addItem(textItem(hash, QStringLiteral("text %1").arg(i), 1000 + i)));
+    }
+    REQUIRE(store.count() == 105);
+
+    store.setMaxEntries(100);
+    REQUIRE(store.maxEntries() == 100);
+    REQUIRE(store.count() == 100);
+    REQUIRE(store.recent(1).first().hash == QStringLiteral("h104"));
+
+    const QVector<Entry> entries = store.recent(100);
+    for (const Entry &entry : entries)
+        REQUIRE(entry.hash != QStringLiteral("h0"));
+}
+
+TEST_CASE("Store::setMaxEntries 夹取到允许范围", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+
+    store.setMaxEntries(1);
+    REQUIRE(store.maxEntries() == Store::kMinRetention);
+
+    store.setMaxEntries(999999);
+    REQUIRE(store.maxEntries() == Store::kMaxRetention);
+}

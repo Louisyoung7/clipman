@@ -11,6 +11,10 @@
 class Store
 {
 public:
+    static constexpr int kMinRetention = 100;
+    static constexpr int kMaxRetention = 10000;
+    static constexpr int kDefaultRetention = 1000;
+
     Store() = default;
     ~Store();
 
@@ -27,6 +31,10 @@ public:
     QVector<Entry> search(const QString &query, int limit = 200) const;
     int count() const;
 
+    // 夹取到 [kMinRetention, kMaxRetention]，并立即裁剪一次。
+    void setMaxEntries(int entries);
+    int maxEntries() const { return m_maxEntries; }
+
     BlobStore &blobStore() { return m_blobs; }
     const BlobStore &blobStore() const { return m_blobs; }
 
@@ -36,4 +44,5 @@ private:
 
     QSqlDatabase m_db;
     BlobStore m_blobs;
+    int m_maxEntries = kDefaultRetention;
 };

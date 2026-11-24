@@ -2,15 +2,19 @@
 #include <QClipboard>
 #include <QDebug>
 #include <QDir>
-#include <QLockFile>
+#include <QImage>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QStandardPaths>
+#include <QUrl>
 
 #include <memory>
 
+#include "core/CaptureService.h"
 #include "core/Store.h"
 #include "platform/ClipboardSource.h"
 #include "platform/ClipboardWatcher.h"
+#include "platform/SingleInstance.h"
 #include "platform/X11Hotkey.h"
 #include "platform/XcbClipboardWatcher.h"
 #include "ui/HistoryWindow.h"
@@ -30,9 +34,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    QLockFile lock(dataDir + QStringLiteral("/clipman.lock"));
-    if (!lock.tryLock(0)) {
-        qWarning() << "Clipman 已在运行";
+    SingleInstance single(dataDir);
+    if (!single.tryBecomePrimary()) {
+        single.notifyExisting();
         return 0;
     }
 
@@ -45,6 +49,7 @@ int main(int argc, char *argv[])
     }
 
     HistoryWindow window(store);
+    CaptureService capture(store.blobStore());
 
     std::unique_ptr<ClipboardSource> source = XcbClipboardWatcher::create();
     if (!source) {
@@ -62,19 +67,59 @@ int main(int argc, char *argv[])
         qWarning() << "全局快捷键不可用（仅 X11 支持），请用托盘打开";
     }
 
-    QObject::connect(source.get(), &ClipboardSource::textCaptured, &window,
-                     [&](const QString &text) {
-                         if (!store.addText(text, &error))
+    bool paused = false;
+
+    QObject::connect(source.get(), &ClipboardSource::itemCaptured, &window,
+                     [&](const ClipboardItem &item) {
+                         if (paused)
+                             return;
+                         capture.submit(item);
+                     });
+
+    QObject::connect(&capture, &CaptureService::ready, &window,
+                     [&](const PreparedItem &item) {
+                         if (!store.addItem(item, &error))
                              qWarning() << "写入历史失败:" << error;
                          if (window.isVisible())
                              window.refresh();
                      });
 
-    QObject::connect(&window, &HistoryWindow::entryActivated, &window,
-                     [&](const QString &text) {
-                         source->suppressNext(text);
-                         QGuiApplication::clipboard()->setText(text);
-                     });
+    QObject::connect(&window, &HistoryWindow::entryActivated, &window, [&](qint64 id) {
+        Entry entry;
+        if (!store.entry(id, &entry))
+            return;
+
+        source->suppressNext();
+        switch (entry.kind) {
+        case ClipKind::Image: {
+            const QImage image(entry.path);
+            if (image.isNull()) {
+                qWarning() << "图片已丢失:" << entry.path;
+                return;
+            }
+            QGuiApplication::clipboard()->setImage(image);
+            break;
+        }
+        case ClipKind::Files: {
+            auto *mime = new QMimeData;
+            QList<QUrl> urls;
+            const QStringList paths = entry.text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            for (const QString &path : paths)
+                urls.append(QUrl::fromLocalFile(path));
+            mime->setUrls(urls);
+            QGuiApplication::clipboard()->setMimeData(mime);
+            break;
+        }
+        case ClipKind::Text:
+            QGuiApplication::clipboard()->setText(entry.text);
+            break;
+        }
+    });
+
+    QObject::connect(&tray, &TrayController::pauseToggled, &window,
+                     [&](bool value) { paused = value; });
+    QObject::connect(&single, &SingleInstance::showRequested, &window,
+                     &HistoryWindow::showPanel);
 
     QObject::connect(&tray, &TrayController::clearRequested, &window, [&] {
         store.clearAll();

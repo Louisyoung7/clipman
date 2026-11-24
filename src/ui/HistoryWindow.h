@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+#include <QPixmap>
 #include <QWidget>
 
 class QEvent;
@@ -8,6 +10,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class Store;
+struct Entry;
 
 class HistoryWindow : public QWidget
 {
@@ -21,7 +24,7 @@ public:
     void togglePanel();
 
 signals:
-    void entryActivated(const QString &text);
+    void entryActivated(qint64 id);
     void cleared();
 
 protected:
@@ -31,9 +34,12 @@ protected:
 private:
     void activateCurrent();
     void deleteCurrent();
+    QString entryLabel(const Entry &entry) const;
+    QPixmap thumbnail(const Entry &entry);
 
     Store &m_store;
     QLineEdit *m_search = nullptr;
     QListWidget *m_list = nullptr;
     QLabel *m_summary = nullptr;
+    QHash<QString, QPixmap> m_thumbCache;
 };

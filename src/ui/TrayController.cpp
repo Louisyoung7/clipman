@@ -51,12 +51,18 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
 
     m_menu = new QMenu;
     QAction *showAction = m_menu->addAction(tr("显示历史"));
+    QAction *pauseAction = m_menu->addAction(tr("暂停记录"));
+    pauseAction->setCheckable(true);
     QAction *clearAction = m_menu->addAction(tr("清空历史"));
     m_menu->addSeparator();
     QAction *quitAction = m_menu->addAction(tr("退出"));
     m_tray->setContextMenu(m_menu);
 
     connect(showAction, &QAction::triggered, this, [this] { m_window->showPanel(); });
+    connect(pauseAction, &QAction::toggled, this, [this](bool paused) {
+        m_tray->setToolTip(paused ? tr("Clipman 已暂停记录") : tr("Clipman 剪贴板历史"));
+        emit pauseToggled(paused);
+    });
     connect(clearAction, &QAction::triggered, this, &TrayController::clearRequested);
     connect(quitAction, &QAction::triggered, this, &TrayController::quitRequested);
 

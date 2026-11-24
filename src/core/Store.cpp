@@ -1,6 +1,5 @@
 #include "core/Store.h"
 
-#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
@@ -12,7 +11,7 @@
 namespace {
 
 constexpr int kMaxEntries = 1000;
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 
 void setError(QString *error, const QString &message)
 {
@@ -40,6 +39,11 @@ bool Store::open(const QString &dbPath, QString *error)
         setError(error, QStringLiteral("无法创建数据目录: %1").arg(info.absolutePath()));
         return false;
     }
+
+    m_blobs = BlobStore(info.absolutePath() + QStringLiteral("/blobs"));
+    QString blobError;
+    if (!m_blobs.initialize(&blobError))
+        qWarning() << "图片存储不可用:" << blobError;
 
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"));
     m_db.setDatabaseName(dbPath);
@@ -113,6 +117,15 @@ bool Store::migrate(QString *error)
                 << QStringLiteral("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')");
         }
 
+        if (version < 3) {
+            // 旧行自动成为 kind='text'；FTS 外部内容表只索引 text_content，无需 rebuild。
+            sql << QStringLiteral("ALTER TABLE entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
+                << QStringLiteral("ALTER TABLE entries ADD COLUMN mime TEXT")
+                << QStringLiteral("ALTER TABLE entries ADD COLUMN path TEXT")
+                << QStringLiteral("ALTER TABLE entries ADD COLUMN width INTEGER")
+                << QStringLiteral("ALTER TABLE entries ADD COLUMN height INTEGER");
+        }
+
         sql << QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion);
         return sql;
     }();
@@ -133,23 +146,28 @@ bool Store::migrate(QString *error)
     return true;
 }
 
-bool Store::addText(const QString &text, QString *error)
+bool Store::addItem(const PreparedItem &item, QString *error)
 {
-    if (text.trimmed().isEmpty())
+    if (!item.valid || item.hash.isEmpty())
         return true;
-
-    const QByteArray utf8 = text.toUtf8();
-    const QByteArray hash = QCryptographicHash::hash(utf8, QCryptographicHash::Sha256).toHex();
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT INTO entries(hash, text_content, byte_size, created_at) VALUES(?, ?, ?, ?) "
+        "INSERT INTO entries(hash, kind, mime, text_content, path, width, height, byte_size, "
+        "created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(hash) DO UPDATE SET "
-        "  created_at = excluded.created_at, byte_size = excluded.byte_size"));
-    query.addBindValue(QString::fromLatin1(hash));
-    query.addBindValue(text);
-    query.addBindValue(utf8.size());
-    query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+        "  created_at = excluded.created_at, byte_size = excluded.byte_size, "
+        "  mime = excluded.mime, path = excluded.path, "
+        "  width = excluded.width, height = excluded.height"));
+    query.addBindValue(item.hash);
+    query.addBindValue(clipKindToString(item.kind));
+    query.addBindValue(item.mime);
+    query.addBindValue(item.text); // 图片为空字符串，避免 FTS 触发器处理 NULL
+    query.addBindValue(item.kind == ClipKind::Image ? QVariant(item.path) : QVariant());
+    query.addBindValue(item.width);
+    query.addBindValue(item.height);
+    query.addBindValue(item.byteSize);
+    query.addBindValue(item.createdAt > 0 ? item.createdAt : QDateTime::currentMSecsSinceEpoch());
 
     if (!query.exec()) {
         setError(error, query.lastError().text());
@@ -162,6 +180,20 @@ bool Store::addText(const QString &text, QString *error)
 
 void Store::prune()
 {
+    QSqlQuery overflow(m_db);
+    overflow.prepare(QStringLiteral(
+        "SELECT id, hash, kind FROM entries WHERE id NOT IN "
+        "(SELECT id FROM entries ORDER BY created_at DESC LIMIT ?)"));
+    overflow.addBindValue(kMaxEntries);
+    if (!overflow.exec())
+        return;
+
+    while (overflow.next()) {
+        if (clipKindFromString(overflow.value(2).toString()) == ClipKind::Image)
+            m_blobs.remove(overflow.value(1).toString());
+    }
+    overflow.finish();
+
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "DELETE FROM entries WHERE id NOT IN "
@@ -170,14 +202,55 @@ void Store::prune()
     query.exec();
 }
 
+void Store::removeBlobFor(qint64 id)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT hash, kind FROM entries WHERE id = ?"));
+    query.addBindValue(id);
+    if (!query.exec() || !query.next())
+        return;
+
+    const QString hash = query.value(0).toString();
+    const ClipKind kind = clipKindFromString(query.value(1).toString());
+    query.finish();
+
+    if (kind == ClipKind::Image)
+        m_blobs.remove(hash);
+}
+
+bool Store::entry(qint64 id, Entry *out) const
+{
+    if (!out)
+        return false;
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
+        "FROM entries WHERE id = ?"));
+    query.addBindValue(id);
+    if (!query.exec() || !query.next())
+        return false;
+
+    out->id = query.value(0).toLongLong();
+    out->hash = query.value(1).toString();
+    out->kind = clipKindFromString(query.value(2).toString());
+    out->mime = query.value(3).toString();
+    out->text = query.value(4).toString();
+    out->path = query.value(5).toString();
+    out->width = query.value(6).toInt();
+    out->height = query.value(7).toInt();
+    out->createdAt = query.value(8).toLongLong();
+    return true;
+}
+
 QVector<Entry> Store::recent(int limit) const
 {
     QVector<Entry> entries;
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "SELECT id, hash, text_content, created_at FROM entries "
-        "ORDER BY created_at DESC LIMIT ?"));
+        "SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
+        "FROM entries ORDER BY created_at DESC LIMIT ?"));
     query.addBindValue(limit);
     if (!query.exec())
         return entries;
@@ -186,8 +259,13 @@ QVector<Entry> Store::recent(int limit) const
         Entry entry;
         entry.id = query.value(0).toLongLong();
         entry.hash = query.value(1).toString();
-        entry.text = query.value(2).toString();
-        entry.createdAt = query.value(3).toLongLong();
+        entry.kind = clipKindFromString(query.value(2).toString());
+        entry.mime = query.value(3).toString();
+        entry.text = query.value(4).toString();
+        entry.path = query.value(5).toString();
+        entry.width = query.value(6).toInt();
+        entry.height = query.value(7).toInt();
+        entry.createdAt = query.value(8).toLongLong();
         entries.append(entry);
     }
     return entries;
@@ -224,7 +302,8 @@ QVector<Entry> Store::search(const QString &query, int limit) const
 
     QSqlQuery ftsQuery(m_db);
     ftsQuery.prepare(QStringLiteral(
-        "SELECT e.id, e.hash, e.text_content, e.created_at "
+        "SELECT e.id, e.hash, e.kind, e.mime, e.text_content, e.path, e.width, e.height, "
+        "e.created_at "
         "FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid "
         "WHERE entries_fts MATCH ? "
         "ORDER BY rank LIMIT ?"));
@@ -239,8 +318,13 @@ QVector<Entry> Store::search(const QString &query, int limit) const
         Entry entry;
         entry.id = ftsQuery.value(0).toLongLong();
         entry.hash = ftsQuery.value(1).toString();
-        entry.text = ftsQuery.value(2).toString();
-        entry.createdAt = ftsQuery.value(3).toLongLong();
+        entry.kind = clipKindFromString(ftsQuery.value(2).toString());
+        entry.mime = ftsQuery.value(3).toString();
+        entry.text = ftsQuery.value(4).toString();
+        entry.path = ftsQuery.value(5).toString();
+        entry.width = ftsQuery.value(6).toInt();
+        entry.height = ftsQuery.value(7).toInt();
+        entry.createdAt = ftsQuery.value(8).toLongLong();
         entries.append(entry);
     }
     return entries;
@@ -248,6 +332,8 @@ QVector<Entry> Store::search(const QString &query, int limit) const
 
 bool Store::removeEntry(qint64 id, QString *error)
 {
+    removeBlobFor(id);
+
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM entries WHERE id = ?"));
     query.addBindValue(id);
@@ -260,6 +346,8 @@ bool Store::removeEntry(qint64 id, QString *error)
 
 bool Store::clearAll(QString *error)
 {
+    m_blobs.clear();
+
     QSqlQuery query(m_db);
     if (!query.exec(QStringLiteral("DELETE FROM entries"))) {
         setError(error, query.lastError().text());

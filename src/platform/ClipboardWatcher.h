@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QString>
+
 #include "platform/ClipboardSource.h"
 
 class QClipboard;
@@ -14,12 +16,13 @@ public:
     explicit ClipboardWatcher(QClipboard *clipboard, QObject *parent = nullptr);
 
     void start() override;
-    void suppressNext(const QString &text) override;
+    void suppressNext() override;
 
 private:
     void onChanged();
+    void armSuppression();
 
     QClipboard *m_clipboard = nullptr;
     QString m_lastText;
-    QString m_suppressedText;
+    bool m_suppressArmed = false;
 };

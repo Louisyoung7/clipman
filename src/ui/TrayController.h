@@ -19,6 +19,7 @@ public:
 signals:
     void clearRequested();
     void quitRequested();
+    void pauseToggled(bool paused);
 
 private:
     HistoryWindow *m_window = nullptr;

@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -35,6 +36,7 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_list->setFocusPolicy(Qt::NoFocus);
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_list->setIconSize(QSize(64, 64));
 
     m_summary = new QLabel(this);
     auto *clearButton = new QPushButton(tr("清空"), this);
@@ -71,6 +73,7 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
 
     connect(clearButton, &QPushButton::clicked, this, [this] {
         m_store.clearAll();
+        m_thumbCache.clear();
         refresh();
         emit cleared();
     });
@@ -81,6 +84,35 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     refresh();
 }
 
+QString HistoryWindow::entryLabel(const Entry &entry) const
+{
+    const QString stamp =
+        QDateTime::fromMSecsSinceEpoch(entry.createdAt).toString(QStringLiteral("MM-dd HH:mm:ss"));
+
+    switch (entry.kind) {
+    case ClipKind::Image:
+        return tr("%1  [图片] %2×%3").arg(stamp).arg(entry.width).arg(entry.height);
+    case ClipKind::Files: {
+        const QStringList paths = entry.text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        return tr("%1  [文件] %2").arg(stamp, paths.join(QStringLiteral(" · ")));
+    }
+    case ClipKind::Text:
+        break;
+    }
+    return tr("%1  %2").arg(stamp, entry.text.simplified());
+}
+
+QPixmap HistoryWindow::thumbnail(const Entry &entry)
+{
+    const auto cached = m_thumbCache.constFind(entry.hash);
+    if (cached != m_thumbCache.constEnd())
+        return cached.value();
+
+    QPixmap pixmap(m_store.blobStore().thumbnailPath(entry.hash));
+    m_thumbCache.insert(entry.hash, pixmap);
+    return pixmap;
+}
+
 void HistoryWindow::refresh()
 {
     const QString query = m_search ? m_search->text() : QString();
@@ -88,12 +120,20 @@ void HistoryWindow::refresh()
 
     m_list->clear();
     for (const Entry &entry : entries) {
-        const QString stamp =
-            QDateTime::fromMSecsSinceEpoch(entry.createdAt).toString(QStringLiteral("MM-dd HH:mm:ss"));
-        auto *item = new QListWidgetItem(tr("%1  %2").arg(stamp, entry.text.simplified()));
-        item->setData(Qt::UserRole, entry.text);
+        auto *item = new QListWidgetItem(entryLabel(entry));
         item->setData(Qt::UserRole + 1, entry.id);
-        item->setToolTip(entry.text.left(5000));
+
+        if (entry.kind == ClipKind::Image) {
+            const QPixmap pixmap = thumbnail(entry);
+            if (!pixmap.isNull())
+                item->setIcon(QIcon(pixmap));
+            item->setToolTip(entry.path);
+        } else if (entry.kind == ClipKind::Files) {
+            item->setToolTip(entry.text);
+        } else {
+            item->setToolTip(entry.text.left(5000));
+        }
+
         m_list->addItem(item);
     }
 
@@ -186,7 +226,7 @@ void HistoryWindow::activateCurrent()
     if (!item)
         return;
 
-    emit entryActivated(item->data(Qt::UserRole).toString());
+    emit entryActivated(item->data(Qt::UserRole + 1).toLongLong());
     hide();
 }
 

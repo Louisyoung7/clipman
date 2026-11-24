@@ -3,6 +3,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QTimer>
+#include <QUrl>
 #include <QtGui/qguiapplication_platform.h>
 
 #include <xcb/xcb.h>
@@ -14,6 +15,7 @@
 namespace {
 
 constexpr int kTimeoutMs = 2000;
+constexpr int kSuppressTimeoutMs = 1500;
 constexpr int kMaxBytes = 32 * 1024 * 1024;
 constexpr auto kClipboardName = "CLIPBOARD";
 constexpr auto kPropertyName = "CLIPMAN_SELECTION";
@@ -40,6 +42,10 @@ XcbClipboardWatcher::XcbClipboardWatcher(xcb_connection_t *connection, QObject *
     m_timeout = new QTimer(this);
     m_timeout->setSingleShot(true);
     connect(m_timeout, &QTimer::timeout, this, &XcbClipboardWatcher::reset);
+
+    m_suppressTimer = new QTimer(this);
+    m_suppressTimer->setSingleShot(true);
+    connect(m_suppressTimer, &QTimer::timeout, this, [this] { m_suppressArmed = false; });
 }
 
 XcbClipboardWatcher::~XcbClipboardWatcher()
@@ -68,12 +74,18 @@ bool XcbClipboardWatcher::initialize()
     m_utf8Atom = internAtom("UTF8_STRING");
     m_textPlainAtom = internAtom("text/plain");
     m_textPlainUtf8Atom = internAtom("text/plain;charset=utf-8");
+    m_uriListAtom = internAtom("text/uri-list");
+    m_pngAtom = internAtom("image/png");
+    m_jpegAtom = internAtom("image/jpeg");
+    m_bmpAtom = internAtom("image/bmp");
+    m_tiffAtom = internAtom("image/tiff");
     m_incrAtom = internAtom("INCR");
     m_propertyAtom = internAtom(kPropertyName);
 
     if (m_clipboardAtom == XCB_NONE || m_targetsAtom == XCB_NONE || m_utf8Atom == XCB_NONE
         || m_textPlainAtom == XCB_NONE || m_textPlainUtf8Atom == XCB_NONE
-        || m_incrAtom == XCB_NONE || m_propertyAtom == XCB_NONE) {
+        || m_uriListAtom == XCB_NONE || m_incrAtom == XCB_NONE
+        || m_propertyAtom == XCB_NONE) {
         return false;
     }
 
@@ -116,10 +128,16 @@ void XcbClipboardWatcher::start()
         requestTargets();
 }
 
-void XcbClipboardWatcher::suppressNext(const QString &text)
+void XcbClipboardWatcher::armSuppression()
 {
-    // 回填后 selection 会以自身为 owner 再触发一次监听；记录文本让 finishTransfer() 跳过回响。
-    m_lastText = text;
+    m_suppressArmed = true;
+    m_suppressTimer->start(kSuppressTimeoutMs);
+}
+
+void XcbClipboardWatcher::suppressNext()
+{
+    // 回填会以自身为 owner 触发一次监听；用标志忽略下一次取权事件。
+    armSuppression();
 }
 
 bool XcbClipboardWatcher::nativeEventFilter(const QByteArray &eventType, void *message,
@@ -161,6 +179,7 @@ void XcbClipboardWatcher::requestTargets()
 {
     m_state = State::WaitingTargets;
     m_target = m_targetsAtom;
+    m_targetMime.clear();
     m_buffer.clear();
 
     xcb_convert_selection(m_conn, m_window, m_clipboardAtom, m_targetsAtom, m_propertyAtom,
@@ -169,10 +188,11 @@ void XcbClipboardWatcher::requestTargets()
     m_timeout->start(kTimeoutMs);
 }
 
-void XcbClipboardWatcher::requestText(xcb_atom_t target)
+void XcbClipboardWatcher::requestTarget(xcb_atom_t target, const QString &mime)
 {
     m_state = State::WaitingText;
     m_target = target;
+    m_targetMime = mime;
 
     xcb_convert_selection(m_conn, m_window, m_clipboardAtom, target, m_propertyAtom, m_ownerTime);
     xcb_flush(m_conn);
@@ -205,6 +225,12 @@ void XcbClipboardWatcher::handleXfixesEvent(const xcb_xfixes_selection_notify_ev
     // 避免 m_owner 停留在上一任 owner 导致后续判断失准。
     m_owner = event->owner;
     m_ownerTime = event->timestamp;
+
+    if (m_suppressArmed) {
+        m_suppressArmed = false;
+        m_suppressTimer->stop();
+        return;
+    }
 
     if (QGuiApplication::clipboard()->ownsClipboard())
         return;
@@ -239,32 +265,47 @@ void XcbClipboardWatcher::handleSelectionNotify(const xcb_selection_notify_event
 
         const auto *atoms = reinterpret_cast<const xcb_atom_t *>(data.constData());
         const int count = data.size() / static_cast<int>(sizeof(xcb_atom_t));
-        bool hasUtf8 = false;
-        bool hasPlainUtf8 = false;
-        bool hasPlain = false;
-        for (int i = 0; i < count; ++i) {
-            if (atoms[i] == m_utf8Atom)
-                hasUtf8 = true;
-            else if (atoms[i] == m_textPlainUtf8Atom)
-                hasPlainUtf8 = true;
-            else if (atoms[i] == m_textPlainAtom)
-                hasPlain = true;
-        }
+        const auto hasTarget = [atoms, count](xcb_atom_t atom) {
+            for (int i = 0; i < count; ++i) {
+                if (atoms[i] == atom)
+                    return true;
+            }
+            return false;
+        };
 
+        // 图片优先于 uri-list：截图工具常同时提供图片与临时文件路径，
+        // 只有图片优先才能把截图回填到图像编辑器。
         xcb_atom_t chosen = XCB_NONE;
-        if (hasUtf8)
+        QString mime;
+        if (m_pngAtom != XCB_NONE && hasTarget(m_pngAtom)) {
+            chosen = m_pngAtom;
+            mime = QStringLiteral("image/png");
+        } else if (m_jpegAtom != XCB_NONE && hasTarget(m_jpegAtom)) {
+            chosen = m_jpegAtom;
+            mime = QStringLiteral("image/jpeg");
+        } else if (m_bmpAtom != XCB_NONE && hasTarget(m_bmpAtom)) {
+            chosen = m_bmpAtom;
+            mime = QStringLiteral("image/bmp");
+        } else if (m_tiffAtom != XCB_NONE && hasTarget(m_tiffAtom)) {
+            chosen = m_tiffAtom;
+            mime = QStringLiteral("image/tiff");
+        } else if (hasTarget(m_uriListAtom)) {
+            chosen = m_uriListAtom;
+            mime = QStringLiteral("text/uri-list");
+        } else if (hasTarget(m_utf8Atom)) {
             chosen = m_utf8Atom;
-        else if (hasPlainUtf8)
+        } else if (hasTarget(m_textPlainUtf8Atom)) {
             chosen = m_textPlainUtf8Atom;
-        else if (hasPlain)
+        } else if (hasTarget(m_textPlainAtom)) {
             chosen = m_textPlainAtom;
+        }
 
         if (chosen == XCB_NONE) {
             reset();
             return;
         }
 
-        requestText(chosen);
+        requestTarget(chosen, mime);
         return;
     }
 
@@ -310,23 +351,76 @@ void XcbClipboardWatcher::handlePropertyNotify(const xcb_property_notify_event_t
     m_timeout->start(kTimeoutMs);
 }
 
-void XcbClipboardWatcher::finishTransfer()
+void XcbClipboardWatcher::emitCollected(const QByteArray &raw)
 {
-    QByteArray data = m_buffer;
+    QByteArray data = raw;
     const xcb_atom_t target = m_target;
-    m_buffer.clear();
+    const QString mime = m_targetMime;
 
     while (data.endsWith('\0'))
         data.chop(1);
 
-    if (!data.isEmpty()) {
-        const QString text = (target == m_textPlainAtom) ? QString::fromLatin1(data)
-                                                         : QString::fromUtf8(data);
-        if (!text.trimmed().isEmpty() && text != m_lastText) {
-            m_lastText = text;
-            emit textCaptured(text);
-        }
+    if (data.isEmpty())
+        return;
+
+    if (target == m_pngAtom || target == m_jpegAtom || target == m_bmpAtom
+        || target == m_tiffAtom) {
+        ClipboardItem item;
+        item.kind = ClipKind::Image;
+        item.mime = mime;
+        item.data = data;
+        emit itemCaptured(item);
+        return;
     }
+
+    if (target == m_uriListAtom) {
+        QStringList paths;
+        const QList<QByteArray> lines = data.split('\n');
+        for (QByteArray line : lines) {
+            if (line.endsWith('\r'))
+                line.chop(1);
+            line = line.trimmed();
+            if (line.isEmpty() || line.startsWith('#'))
+                continue;
+            const QString local = QUrl::fromEncoded(line).toLocalFile();
+            if (!local.isEmpty())
+                paths.append(local);
+        }
+        if (paths.isEmpty())
+            return;
+
+        ClipboardItem item;
+        item.kind = ClipKind::Files;
+        item.paths = paths;
+        item.text = paths.join(QLatin1Char('\n'));
+        emit itemCaptured(item);
+        return;
+    }
+
+    const QString text =
+        (target == m_textPlainAtom) ? QString::fromLatin1(data) : QString::fromUtf8(data);
+    if (text.trimmed().isEmpty() || text == m_lastText)
+        return;
+
+    m_lastText = text;
+
+    ClipboardItem item;
+    item.kind = ClipKind::Text;
+    item.text = text;
+    emit itemCaptured(item);
+}
+
+void XcbClipboardWatcher::finishTransfer()
+{
+    const QByteArray data = m_buffer;
+    m_buffer.clear();
+
+    if (data.size() > kMaxBytes) {
+        reset();
+        return;
+    }
+
+    emitCollected(data);
     reset();
 }
 
@@ -334,6 +428,7 @@ void XcbClipboardWatcher::reset()
 {
     m_state = State::Idle;
     m_target = XCB_NONE;
+    m_targetMime.clear();
     m_buffer.clear();
     if (m_timeout)
         m_timeout->stop();

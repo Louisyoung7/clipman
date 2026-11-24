@@ -27,6 +27,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("clipman"));
     QApplication::setApplicationName(QStringLiteral("clipman"));
+    QApplication::setApplicationVersion(QStringLiteral(CLIPMAN_VERSION));
     QApplication::setApplicationDisplayName(QStringLiteral("Clipman"));
     QApplication::setDesktopFileName(QStringLiteral("clipman"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/clipman.svg")));

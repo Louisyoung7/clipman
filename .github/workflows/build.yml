@@ -3,6 +3,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -27,8 +28,22 @@ jobs:
             libxcb1-dev libxcb-xfixes0-dev libxcb-icccm4-dev libxfixes-dev \
             catch2 desktop-file-utils
 
+      - name: 解析版本
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 配置
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          args=(-DCMAKE_BUILD_TYPE=Release)
+          if [[ -n "${{ steps.version.outputs.value }}" ]]; then
+            args+=("-DCLIPMAN_VERSION=${{ steps.version.outputs.value }}")
+          fi
+          cmake -S . -B build "${args[@]}"
 
       - name: 构建（零警告门槛）
         run: |
@@ -56,6 +71,12 @@ jobs:
           deb=$(ls build/package/*.deb | head -1)
           dpkg-deb -I "$deb"
           dpkg-deb -c "$deb"
+          deb_version=$(dpkg-deb -f "$deb" Version)
+          echo "deb 版本: $deb_version"
+          if [[ -n "${{ steps.version.outputs.value }}" && "$deb_version" != "${{ steps.version.outputs.value }}" ]]; then
+            echo "::error::deb 版本 $deb_version 与 tag 不一致"
+            exit 1
+          fi
           dpkg-deb -x "$deb" /tmp/clipman-root
           if readelf -d /tmp/clipman-root/usr/bin/clipman | grep -qi runpath; then
             echo '::error::deb 内二进制仍带 RUNPATH'

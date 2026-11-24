@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Clipman VERSION 0.1.0 LANGUAGES CXX)
+# 版本号单一真源；打 tag 时 CI 用 -DCLIPMAN_VERSION=<tag 去掉 v> 覆盖。
+set(CLIPMAN_VERSION "0.3.0" CACHE STRING "Clipman 应用版本号")
+
+project(Clipman VERSION ${CLIPMAN_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +57,7 @@ qt_add_executable(clipman
 )
 
 target_include_directories(clipman PRIVATE src)
+target_compile_definitions(clipman PRIVATE CLIPMAN_VERSION="${PROJECT_VERSION}")
 
 qt_add_resources(clipman "clipman_icons"
     PREFIX "/icons"

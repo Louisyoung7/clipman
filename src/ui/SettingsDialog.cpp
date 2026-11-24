@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -94,6 +95,9 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
     generalForm->addRow(tr("保留条数"), m_retentionSpin);
 
     m_hotkeyEdit = new QKeySequenceEdit(generalGroup);
+    // 桌面里存在常驻程序在窗口层面主动抓取键盘，纯 Alt 组合键（如 Alt+C）到不了录制框，
+    // 只会收到 Alt 本身；因此聚焦录制框时主动抓取键盘，抢在其他程序之前收到按键。
+    m_hotkeyEdit->installEventFilter(this);
     generalForm->addRow(tr("全局快捷键"), m_hotkeyEdit);
     generalLayout->addLayout(generalForm);
 
@@ -218,6 +222,9 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
 
 void SettingsDialog::done(int result)
 {
+    // 关闭前先松开键盘抓取，避免对话框消失后仍然独占键盘。
+    m_hotkeyEdit->releaseKeyboard();
+
     // 兜底：用户在完成计时器触发前就关闭对话框时，仍同步校验并应用最后一次修改。
     const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
     if (sequence != m_appliedSequence && !applyHotkeySequence(sequence))
@@ -225,6 +232,33 @@ void SettingsDialog::done(int result)
 
     saveSettings();
     QDialog::done(result);
+}
+
+bool SettingsDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_hotkeyEdit) {
+        switch (event->type()) {
+        case QEvent::FocusIn:
+            m_hotkeyEdit->grabKeyboard();
+            break;
+        case QEvent::FocusOut:
+        case QEvent::Hide:
+            m_hotkeyEdit->releaseKeyboard();
+            break;
+        default:
+            break;
+        }
+    }
+    return QDialog::eventFilter(watched, event);
+}
+
+void SettingsDialog::changeEvent(QEvent *event)
+{
+    // 窗口失去激活（例如切到别的应用或弹出消息框）时同样松开抓取，
+    // 否则键盘会被对话框一直独占。
+    if (event->type() == QEvent::WindowDeactivate)
+        m_hotkeyEdit->releaseKeyboard();
+    QDialog::changeEvent(event);
 }
 
 bool SettingsDialog::applyHotkeySequence(const QString &sequence)

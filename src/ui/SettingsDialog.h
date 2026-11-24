@@ -11,6 +11,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QEvent;
 class QKeySequenceEdit;
 class QLabel;
 class QLineEdit;
@@ -29,6 +30,8 @@ public:
 
 protected:
     void done(int result) override;
+    void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void checkForUpdates();

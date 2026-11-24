@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QNetworkAccessManager>
+#include <QNetworkProxy>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -34,6 +35,7 @@ public:
 
     void checkLatest(const QString &owner, const QString &repo, const QString &currentVersion);
     void download(const ReleaseInfo &info, const QString &targetPath);
+    void setProxy(const QNetworkProxy &proxy);
 
     // 语义化版本比较：仅当 candidate > current 时返回 true；解析失败一律视为无更新。
     static bool isNewer(const QString &candidate, const QString &current);

@@ -1,6 +1,7 @@
 #include "platform/Autostart.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QSettings>
@@ -55,6 +56,17 @@ bool Autostart::isEnabled() const
 
 bool Autostart::setEnabled(bool enabled, QString *error)
 {
+    // 没有系统级条目时，关闭直接删除用户文件，避免留下无意义的 Hidden=true。
+    if (!enabled && !QFileInfo::exists(m_systemFile)) {
+        if (!QFileInfo::exists(m_userFile))
+            return true;
+        if (!QFile::remove(m_userFile)) {
+            setError(error, QStringLiteral("无法删除自启文件: %1").arg(m_userFile));
+            return false;
+        }
+        return true;
+    }
+
     const QFileInfo info(m_userFile);
     if (!QDir().mkpath(info.absolutePath())) {
         setError(error, QStringLiteral("无法创建自启目录: %1").arg(info.absolutePath()));

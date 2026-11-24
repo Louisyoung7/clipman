@@ -13,7 +13,6 @@
 
 #include "core/CaptureService.h"
 #include "core/Store.h"
-#include "platform/Autostart.h"
 #include "platform/ClipboardSource.h"
 #include "platform/ClipboardWatcher.h"
 #include "platform/SingleInstance.h"
@@ -64,16 +63,6 @@ int main(int argc, char *argv[])
     }
 
     TrayController tray(&window);
-
-    Autostart autostart;
-    tray.setAutostartEnabled(autostart.isEnabled());
-    QObject::connect(&tray, &TrayController::autostartToggled, &window, [&](bool enabled) {
-        QString autostartError;
-        if (autostart.setEnabled(enabled, &autostartError))
-            return;
-        qWarning() << "设置开机自启失败:" << autostartError;
-        tray.setAutostartEnabled(autostart.isEnabled());
-    });
 
     std::unique_ptr<X11Hotkey> hotkey = X11Hotkey::create();
     if (hotkey) {

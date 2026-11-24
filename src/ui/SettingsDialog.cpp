@@ -1,13 +1,23 @@
 #include "ui/SettingsDialog.h"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
+#include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
+#include <QNetworkProxyFactory>
+#include <QNetworkProxyQuery>
 #include <QProcess>
 #include <QPushButton>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -22,28 +32,77 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Clipman 设置"));
-    setMinimumWidth(420);
+    setMinimumWidth(460);
 
     auto *layout = new QVBoxLayout(this);
 
-    auto *versionLabel =
-        new QLabel(tr("当前版本：%1").arg(QApplication::applicationVersion()), this);
-    layout->addWidget(versionLabel);
+    auto *generalGroup = new QGroupBox(tr("通用"), this);
+    auto *generalLayout = new QVBoxLayout(generalGroup);
+    m_autostartCheck = new QCheckBox(tr("开机时自动启动 Clipman"), generalGroup);
+    generalLayout->addWidget(m_autostartCheck);
+    layout->addWidget(generalGroup);
 
-    m_statusLabel = new QLabel(tr("点击「检查更新」获取 GitHub 上的最新版本。"), this);
+    auto *updateGroup = new QGroupBox(tr("更新"), this);
+    auto *updateLayout = new QVBoxLayout(updateGroup);
+    auto *versionLabel =
+        new QLabel(tr("当前版本：%1").arg(QApplication::applicationVersion()), updateGroup);
+    updateLayout->addWidget(versionLabel);
+
+    m_checkButton = new QPushButton(tr("检查更新"), updateGroup);
+    updateLayout->addWidget(m_checkButton, 0, Qt::AlignLeft);
+
+    m_statusLabel = new QLabel(tr("点击「检查更新」获取 GitHub 上的最新版本。"), updateGroup);
     m_statusLabel->setWordWrap(true);
-    layout->addWidget(m_statusLabel);
+    updateLayout->addWidget(m_statusLabel);
+    layout->addWidget(updateGroup);
+
+    auto *networkGroup = new QGroupBox(tr("网络"), this);
+    auto *form = new QFormLayout(networkGroup);
+
+    m_proxyMode = new QComboBox(networkGroup);
+    m_proxyMode->addItem(tr("跟随系统 / 环境变量"), QStringLiteral("system"));
+    m_proxyMode->addItem(tr("不使用代理"), QStringLiteral("none"));
+    m_proxyMode->addItem(tr("手动配置"), QStringLiteral("manual"));
+    form->addRow(tr("代理"), m_proxyMode);
+
+    m_proxyType = new QComboBox(networkGroup);
+    m_proxyType->addItem(QStringLiteral("HTTP"), QStringLiteral("http"));
+    m_proxyType->addItem(QStringLiteral("SOCKS5"), QStringLiteral("socks5"));
+    form->addRow(tr("类型"), m_proxyType);
+
+    m_proxyHost = new QLineEdit(networkGroup);
+    m_proxyHost->setPlaceholderText(QStringLiteral("127.0.0.1"));
+    form->addRow(tr("地址"), m_proxyHost);
+
+    m_proxyPort = new QSpinBox(networkGroup);
+    m_proxyPort->setRange(1, 65535);
+    form->addRow(tr("端口"), m_proxyPort);
+
+    auto *hint = new QLabel(tr("代理仅用于检查更新与下载更新包。GitHub 访问受限时请在此配置。"),
+                            networkGroup);
+    hint->setWordWrap(true);
+    form->addRow(hint);
+    layout->addWidget(networkGroup);
 
     auto *buttons = new QHBoxLayout;
-    m_checkButton = new QPushButton(tr("检查更新"), this);
     m_closeButton = new QPushButton(tr("关闭"), this);
-    buttons->addWidget(m_checkButton);
     buttons->addStretch();
     buttons->addWidget(m_closeButton);
     layout->addLayout(buttons);
 
-    connect(m_checkButton, &QPushButton::clicked, this, &SettingsDialog::checkForUpdates);
     connect(m_closeButton, &QPushButton::clicked, this, &QDialog::accept);
+    connect(m_checkButton, &QPushButton::clicked, this, &SettingsDialog::checkForUpdates);
+    connect(m_proxyMode, &QComboBox::currentIndexChanged, this, [this] { updateProxyControls(); });
+    connect(m_autostartCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        QString error;
+        if (m_autostart.setEnabled(enabled, &error))
+            return;
+        QMessageBox::warning(this, tr("设置开机自启失败"), error);
+        const QSignalBlocker blocker(m_autostartCheck);
+        m_autostartCheck->setChecked(!enabled);
+    });
+
+    loadSettings();
 
     m_checker = new UpdateChecker(this);
     connect(m_checker, &UpdateChecker::updateAvailable, this, &SettingsDialog::onUpdateAvailable);
@@ -78,10 +137,84 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     });
 }
 
+void SettingsDialog::done(int result)
+{
+    saveSettings();
+    QDialog::done(result);
+}
+
+void SettingsDialog::loadSettings()
+{
+    QSettings settings;
+    const QString mode =
+        settings.value(QStringLiteral("network/proxyMode"), QStringLiteral("system")).toString();
+    const int modeIndex = m_proxyMode->findData(mode);
+    m_proxyMode->setCurrentIndex(modeIndex >= 0 ? modeIndex : 0);
+
+    const QString type =
+        settings.value(QStringLiteral("network/proxyType"), QStringLiteral("http")).toString();
+    const int typeIndex = m_proxyType->findData(type);
+    m_proxyType->setCurrentIndex(typeIndex >= 0 ? typeIndex : 0);
+
+    m_proxyHost->setText(
+        settings.value(QStringLiteral("network/proxyHost"), QStringLiteral("127.0.0.1"))
+            .toString());
+    m_proxyPort->setValue(settings.value(QStringLiteral("network/proxyPort"), 7890).toInt());
+
+    updateProxyControls();
+    const QSignalBlocker blocker(m_autostartCheck);
+    m_autostartCheck->setChecked(m_autostart.isEnabled());
+}
+
+void SettingsDialog::saveSettings()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("network/proxyMode"), m_proxyMode->currentData().toString());
+    settings.setValue(QStringLiteral("network/proxyType"), m_proxyType->currentData().toString());
+    settings.setValue(QStringLiteral("network/proxyHost"), m_proxyHost->text().trimmed());
+    settings.setValue(QStringLiteral("network/proxyPort"), m_proxyPort->value());
+    settings.sync();
+}
+
+void SettingsDialog::updateProxyControls()
+{
+    const bool manual = m_proxyMode->currentData().toString() == QLatin1String("manual");
+    m_proxyType->setEnabled(manual);
+    m_proxyHost->setEnabled(manual);
+    m_proxyPort->setEnabled(manual);
+}
+
+QNetworkProxy SettingsDialog::resolvedProxy() const
+{
+    const QString mode = m_proxyMode->currentData().toString();
+    if (mode == QLatin1String("none"))
+        return QNetworkProxy(QNetworkProxy::NoProxy);
+
+    if (mode == QLatin1String("manual")) {
+        const QString host = m_proxyHost->text().trimmed();
+        if (host.isEmpty())
+            return QNetworkProxy(QNetworkProxy::NoProxy);
+
+        const QNetworkProxy::ProxyType type =
+            m_proxyType->currentData().toString() == QLatin1String("socks5")
+                ? QNetworkProxy::Socks5Proxy
+                : QNetworkProxy::HttpProxy;
+        return QNetworkProxy(type, host, static_cast<quint16>(m_proxyPort->value()));
+    }
+
+    // 跟随系统：读取 http_proxy/https_proxy 或桌面环境配置。
+    const QList<QNetworkProxy> proxies = QNetworkProxyFactory::systemProxyForQuery(
+        QNetworkProxyQuery(QUrl(QStringLiteral("https://api.github.com"))));
+    return proxies.isEmpty() ? QNetworkProxy(QNetworkProxy::NoProxy) : proxies.first();
+}
+
 void SettingsDialog::checkForUpdates()
 {
     if (m_busy)
         return;
+
+    saveSettings();
+    m_checker->setProxy(resolvedProxy());
 
     setBusy(true);
     setStatus(tr("正在检查更新…"));

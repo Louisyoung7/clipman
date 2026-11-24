@@ -1,5 +1,7 @@
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -13,7 +15,8 @@ class TestAutostart : public QObject
 private slots:
     void disabledWhenNoFiles();
     void enableWritesVisibleEntry();
-    void disableWritesHiddenEntry();
+    void disableRemovesEntryWithoutSystemFile();
+    void disableHidesSystemEntry();
 };
 
 void TestAutostart::disabledWhenNoFiles()
@@ -42,7 +45,7 @@ void TestAutostart::enableWritesVisibleEntry()
     QVERIFY(autostart.isEnabled());
 }
 
-void TestAutostart::disableWritesHiddenEntry()
+void TestAutostart::disableRemovesEntryWithoutSystemFile()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
@@ -50,6 +53,26 @@ void TestAutostart::disableWritesHiddenEntry()
     Autostart autostart(temp.path() + QStringLiteral("/config"),
                         temp.path() + QStringLiteral("/system/clipman.desktop"));
     QVERIFY(autostart.setEnabled(true));
+    QVERIFY(autostart.setEnabled(false));
+
+    QVERIFY(!QFileInfo::exists(autostart.userFilePath()));
+    QVERIFY(!autostart.isEnabled());
+}
+
+void TestAutostart::disableHidesSystemEntry()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    const QString systemFile = temp.path() + QStringLiteral("/system/clipman.desktop");
+    QVERIFY(QDir().mkpath(QFileInfo(systemFile).absolutePath()));
+    QFile file(systemFile);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("[Desktop Entry]\nType=Application\n");
+    file.close();
+
+    Autostart autostart(temp.path() + QStringLiteral("/config"), systemFile);
+    QVERIFY(autostart.isEnabled());
     QVERIFY(autostart.setEnabled(false));
 
     QSettings settings(autostart.userFilePath(), QSettings::IniFormat);

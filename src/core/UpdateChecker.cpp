@@ -53,6 +53,11 @@ UpdateChecker::UpdateChecker(QObject *parent)
 {
 }
 
+void UpdateChecker::setProxy(const QNetworkProxy &proxy)
+{
+    m_network.setProxy(proxy);
+}
+
 void UpdateChecker::checkLatest(const QString &owner, const QString &repo,
                                 const QString &currentVersion)
 {
@@ -77,7 +82,8 @@ void UpdateChecker::checkLatest(const QString &owner, const QString &repo,
             if (status == 404) {
                 emit checkFailed(tr("未找到发布信息（HTTP 404），请确认仓库已公开"));
             } else if (status == 403) {
-                emit checkFailed(tr("GitHub API 访问受限（HTTP 403），请稍后再试"));
+                emit checkFailed(tr("GitHub API 访问受限（HTTP 403），可能是速率限制或网络被拦截；"
+                                    "可在「网络」中配置代理后重试"));
             } else {
                 emit checkFailed(tr("检查更新失败：%1").arg(reply->errorString()));
             }

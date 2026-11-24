@@ -101,7 +101,7 @@ set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "libqt6core6t64 (>= 6.4), libqt6gui6t64, libqt6widgets6t64, libqt6sql6t64, \
-libqt6sql6-sqlite, libqt6dbus6t64, libqt6concurrent6t64, libqt6svg6, \
+libqt6sql6-sqlite, libqt6dbus6t64, libqt6concurrent6t64, libqt6svg6, libqt6network6t64, \
 libxcb1, libxcb-xfixes0, libxfixes3")
 
 execute_process(COMMAND dpkg --print-architecture

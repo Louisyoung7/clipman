@@ -133,7 +133,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 | 全局快捷键在 Wayland 受限 | Wayland 下 `grab_key` 无效 | 明确不支持 Wayland（见下条） |
 | Wayland + GNOME 缺少 `wlr-data-control` | 历史管理器读不到其他应用的剪贴板，非"排期能解决"而是能力不可达 | 不作为目标平台；若将来支持，仅限 KDE/wlroots 并单独立项 |
 | 图片以字节哈希去重 | 同一图片经不同编码（PNG/JPEG）会存成两条 | 已接受，M2 范围内不做感知哈希 |
-| 更新检查依赖 GitHub Releases API | 未认证配额 60 次/小时，触发限流时无法检查 | 提示稍后重试，不做本地缓存 |
+| 更新检查依赖 GitHub Releases API | 未认证配额 60 次/小时，触发限流时无法检查 | 已缓解：403 时自动改用网页接口兜底，不消耗 API 配额 |
 | deb 构建环境 | 本地手动打包依赖本机 Qt 6.8.3；正式发行需用 CI（Ubuntu 24.04 系统 Qt 6.4.2）产物 | GitHub Actions 已配置，发布用其 artifact |
 
 ## 7. 完成定义（DoD）

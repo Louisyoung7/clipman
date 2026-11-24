@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -10,6 +11,8 @@
 #include <QJsonParseError>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
+#include <QStringList>
 #include <QVector>
 
 namespace {
@@ -17,6 +20,24 @@ namespace {
 QString userAgent()
 {
     return QStringLiteral("Clipman-Updater/%1").arg(QCoreApplication::applicationVersion());
+}
+
+QString versionFromTag(const QString &tagName)
+{
+    QString version = tagName;
+    if (version.startsWith(QLatin1Char('v')) || version.startsWith(QLatin1Char('V')))
+        version.remove(0, 1);
+    return version;
+}
+
+QNetworkRequest makeRequest(const QUrl &url, int timeoutMs)
+{
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::NoLessSafeRedirectPolicy);
+    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setTransferTimeout(timeoutMs);
+    return request;
 }
 
 QVector<int> parseVersion(const QString &text)
@@ -61,7 +82,7 @@ void UpdateChecker::setProxy(const QNetworkProxy &proxy)
 void UpdateChecker::checkLatest(const QString &owner, const QString &repo,
                                 const QString &currentVersion)
 {
-    if (m_checkReply)
+    if (m_checkReply || m_webReply)
         return;
 
     const QUrl url(
@@ -72,21 +93,23 @@ void UpdateChecker::checkLatest(const QString &owner, const QString &repo,
     request.setTransferTimeout(15000);
 
     m_checkReply = m_network.get(request);
-    connect(m_checkReply, &QNetworkReply::finished, this, [this, currentVersion] {
+    connect(m_checkReply, &QNetworkReply::finished, this, [this, owner, repo, currentVersion] {
         QNetworkReply *reply = m_checkReply;
         m_checkReply = nullptr;
         reply->deleteLater();
 
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError) {
-            if (status == 404) {
-                emit checkFailed(tr("未找到发布信息（HTTP 404），请确认仓库已公开"));
-            } else if (status == 403) {
-                emit checkFailed(tr("GitHub API 访问受限（HTTP 403），可能是速率限制或网络被拦截；"
-                                    "可在「网络」中配置代理后重试"));
-            } else {
-                emit checkFailed(tr("检查更新失败：%1").arg(reply->errorString()));
+            const QString reason =
+                httpFailureReason(status, reply->rawHeader("x-ratelimit-remaining"),
+                                  reply->rawHeader("x-ratelimit-reset"),
+                                  reply->rawHeader("retry-after"), reply->errorString());
+            // 403/429 多为未登录 API 限流；API 不可用时改用网页接口，避免额度耗尽即无法更新。
+            if (status == 403 || status == 429) {
+                startWebFallback(owner, repo, currentVersion, reason);
+                return;
             }
+            emit checkFailed(reason);
             return;
         }
 
@@ -101,6 +124,158 @@ void UpdateChecker::checkLatest(const QString &owner, const QString &repo,
         else
             emit upToDate(info.version);
     });
+}
+
+void UpdateChecker::startWebFallback(const QString &owner, const QString &repo,
+                                     const QString &currentVersion, const QString &apiFailure)
+{
+    const QUrl url(QStringLiteral("https://github.com/%1/%2/releases/latest").arg(owner, repo));
+    m_webReply = m_network.get(makeRequest(url, 15000));
+    connect(m_webReply, &QNetworkReply::finished, this,
+            [this, owner, repo, currentVersion, apiFailure] {
+                QNetworkReply *reply = m_webReply;
+                m_webReply = nullptr;
+                reply->deleteLater();
+
+                // /releases/latest 会 302 到 /releases/tag/<tag>，不占用 API 速率额度。
+                const QString tagName = reply->error() == QNetworkReply::NoError
+                                            ? tagFromReleaseUrl(reply->url())
+                                            : QString();
+                if (tagName.isEmpty()) {
+                    const QString detail = reply->error() == QNetworkReply::NoError
+                                               ? tr("未找到发布版本")
+                                               : reply->errorString();
+                    emit checkFailed(tr("%1\n备用检查也失败：%2").arg(apiFailure, detail));
+                    return;
+                }
+
+                // 资产列表由单独的网页片段返回，同样不消耗 API 额度。
+                const QUrl assetsUrl(
+                    QStringLiteral("https://github.com/%1/%2/releases/expanded_assets/%3")
+                        .arg(owner, repo, QString::fromLatin1(QUrl::toPercentEncoding(tagName))));
+                m_webReply = m_network.get(makeRequest(assetsUrl, 15000));
+                connect(
+                    m_webReply, &QNetworkReply::finished, this,
+                    [this, tagName, currentVersion, apiFailure] {
+                        QNetworkReply *assetsReply = m_webReply;
+                        m_webReply = nullptr;
+                        assetsReply->deleteLater();
+
+                        const bool ok = assetsReply->error() == QNetworkReply::NoError;
+                        const ReleaseInfo info =
+                            ok ? parseAssetsHtml(assetsReply->readAll(), tagName) : ReleaseInfo();
+                        if (!info.isValid()) {
+                            const QString detail =
+                                ok ? tr("发布页格式无法解析") : assetsReply->errorString();
+                            emit checkFailed(tr("%1\n备用检查也失败：%2").arg(apiFailure, detail));
+                            return;
+                        }
+
+                        if (isNewer(info.version, currentVersion))
+                            emit updateAvailable(info);
+                        else
+                            emit upToDate(info.version);
+                    });
+            });
+}
+
+QString UpdateChecker::tagFromReleaseUrl(const QUrl &url)
+{
+    const QString marker = QStringLiteral("/releases/tag/");
+    const QString path = url.path();
+    const int index = path.indexOf(marker);
+    if (index < 0)
+        return {};
+
+    QString tagName = QUrl::fromPercentEncoding(path.mid(index + marker.size()).toUtf8());
+    while (tagName.endsWith(QLatin1Char('/')))
+        tagName.chop(1);
+    return tagName;
+}
+
+ReleaseInfo UpdateChecker::parseAssetsHtml(const QByteArray &html, const QString &tagName)
+{
+    if (tagName.isEmpty())
+        return {};
+
+    static const QRegularExpression hrefPattern(QStringLiteral("href=\"([^\"]+)\""));
+    const QString text = QString::fromUtf8(html);
+    QStringList downloads;
+    auto it = hrefPattern.globalMatch(text);
+    while (it.hasNext()) {
+        const QString href = it.next().captured(1);
+        if (href.contains(QLatin1String("/releases/download/")))
+            downloads.append(href);
+    }
+
+    QString debPath;
+    for (const QString &href : downloads) {
+        if (href.endsWith(QLatin1String(".deb"))) {
+            debPath = href;
+            break;
+        }
+    }
+    if (debPath.isEmpty())
+        return {};
+
+    // 与 API 路径一致：优先 <deb>.sha256，其次 checksums.sha256，最后任意 sha256。
+    const QString debName = debPath.section(QLatin1Char('/'), -1);
+    QString checksumPath;
+    const QStringList preferred = {debName + QStringLiteral(".sha256"),
+                                   QStringLiteral("checksums.sha256")};
+    for (const QString &name : preferred) {
+        for (const QString &href : downloads) {
+            if (href.section(QLatin1Char('/'), -1) == name) {
+                checksumPath = href;
+                break;
+            }
+        }
+        if (!checksumPath.isEmpty())
+            break;
+    }
+    if (checksumPath.isEmpty()) {
+        for (const QString &href : downloads) {
+            if (href.endsWith(QLatin1String(".sha256"))) {
+                checksumPath = href;
+                break;
+            }
+        }
+    }
+
+    const QUrl base(QStringLiteral("https://github.com"));
+    ReleaseInfo info;
+    info.tagName = tagName;
+    info.version = versionFromTag(tagName);
+    info.debUrl = base.resolved(QUrl(debPath));
+    if (!info.debUrl.isValid() || info.debUrl.isEmpty())
+        return {};
+    if (!checksumPath.isEmpty())
+        info.checksumUrl = base.resolved(QUrl(checksumPath));
+    return info;
+}
+
+QString UpdateChecker::httpFailureReason(int status, const QByteArray &rateRemaining,
+                                         const QByteArray &rateReset, const QByteArray &retryAfter,
+                                         const QString &errorText)
+{
+    if (status == 404)
+        return tr("未找到发布信息（HTTP 404），请确认仓库已公开");
+
+    if (status == 403 || status == 429) {
+        bool ok = false;
+        const qint64 reset = rateReset.trimmed().toLongLong(&ok);
+        if (ok && rateRemaining.trimmed() == QByteArrayLiteral("0")) {
+            const QString resume =
+                QDateTime::fromSecsSinceEpoch(reset).toString(QStringLiteral("HH:mm"));
+            return tr("GitHub API 速率限制已用尽（未登录每小时 60 次），%1 后恢复").arg(resume);
+        }
+        const qint64 wait = retryAfter.trimmed().toLongLong(&ok);
+        if (ok && wait > 0)
+            return tr("GitHub 要求稍后重试（HTTP %1），请等待 %2 秒后再试").arg(status).arg(wait);
+        return tr("GitHub 拒绝访问（HTTP %1），可能是网络或代理拦截").arg(status);
+    }
+
+    return errorText.isEmpty() ? tr("检查更新失败") : tr("检查更新失败：%1").arg(errorText);
 }
 
 void UpdateChecker::download(const ReleaseInfo &info, const QString &targetPath)
@@ -236,9 +411,7 @@ ReleaseInfo UpdateChecker::parseLatestRelease(const QByteArray &json)
     if (info.tagName.isEmpty())
         return ReleaseInfo();
 
-    info.version = info.tagName;
-    if (info.version.startsWith(QLatin1Char('v')) || info.version.startsWith(QLatin1Char('V')))
-        info.version.remove(0, 1);
+    info.version = versionFromTag(info.tagName);
 
     const QJsonArray assets = root.value(QStringLiteral("assets")).toArray();
     QString debName;

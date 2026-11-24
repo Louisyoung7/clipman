@@ -73,3 +73,65 @@ TEST_CASE("UpdateChecker 对异常响应返回无效结果", "[update]")
     })";
     REQUIRE_FALSE(UpdateChecker::parseLatestRelease(noDeb).isValid());
 }
+
+TEST_CASE("UpdateChecker 从网页重定向地址提取 tag", "[update]")
+{
+    REQUIRE(UpdateChecker::tagFromReleaseUrl(QUrl(QStringLiteral(
+                "https://github.com/o/r/releases/tag/v0.5.0"))) == QStringLiteral("v0.5.0"));
+    REQUIRE(UpdateChecker::tagFromReleaseUrl(QUrl(QStringLiteral(
+                "https://github.com/o/r/releases/tag/v0.5.0/"))) == QStringLiteral("v0.5.0"));
+    REQUIRE(UpdateChecker::tagFromReleaseUrl(
+                QUrl(QStringLiteral("https://github.com/o/r/releases/latest")))
+                .isEmpty());
+}
+
+TEST_CASE("UpdateChecker 从发布页 HTML 解析更新包", "[update]")
+{
+    const QByteArray html = R"(
+        <a href="/o/r/releases/download/v0.6.0/checksums.sha256">checksums.sha256</a>
+        <a href="/o/r/releases/download/v0.6.0/clipman_0.6.0_amd64.deb">clipman_0.6.0_amd64.deb</a>
+        <a href="/o/r/archive/refs/tags/v0.6.0.tar.gz">Source code</a>)";
+
+    const ReleaseInfo info = UpdateChecker::parseAssetsHtml(html, QStringLiteral("v0.6.0"));
+    REQUIRE(info.isValid());
+    REQUIRE(info.tagName == QStringLiteral("v0.6.0"));
+    REQUIRE(info.version == QStringLiteral("0.6.0"));
+    REQUIRE(info.debUrl ==
+            QUrl(QStringLiteral(
+                "https://github.com/o/r/releases/download/v0.6.0/clipman_0.6.0_amd64.deb")));
+    REQUIRE(
+        info.checksumUrl ==
+        QUrl(QStringLiteral("https://github.com/o/r/releases/download/v0.6.0/checksums.sha256")));
+
+    // 同名 .sha256 优先于 checksums.sha256。
+    const QByteArray both = R"(
+        <a href="/o/r/releases/download/v0.6.0/checksums.sha256">checksums.sha256</a>
+        <a href="/o/r/releases/download/v0.6.0/clipman_0.6.0_amd64.deb">deb</a>
+        <a href="/o/r/releases/download/v0.6.0/clipman_0.6.0_amd64.deb.sha256">deb.sha256</a>)";
+    REQUIRE(UpdateChecker::parseAssetsHtml(both, QStringLiteral("v0.6.0")).checksumUrl ==
+            QUrl(QStringLiteral(
+                "https://github.com/o/r/releases/download/v0.6.0/clipman_0.6.0_amd64.deb.sha256")));
+
+    REQUIRE_FALSE(UpdateChecker::parseAssetsHtml(html, QString()).isValid());
+    REQUIRE_FALSE(
+        UpdateChecker::parseAssetsHtml("<html></html>", QStringLiteral("v0.6.0")).isValid());
+}
+
+TEST_CASE("UpdateChecker 为 403 区分限流与拦截", "[update]")
+{
+    const QString limited = UpdateChecker::httpFailureReason(
+        403, QByteArrayLiteral("0"), QByteArrayLiteral("1795526395"), QByteArray(),
+        QStringLiteral("server replied"));
+    REQUIRE(limited.contains(QStringLiteral("速率限制")));
+
+    const QString retryLater = UpdateChecker::httpFailureReason(
+        429, QByteArrayLiteral("10"), QByteArray(), QByteArrayLiteral("42"), QString());
+    REQUIRE(retryLater.contains(QStringLiteral("42")));
+
+    const QString blocked =
+        UpdateChecker::httpFailureReason(403, {}, {}, {}, QStringLiteral("blocked"));
+    REQUIRE(blocked.contains(QStringLiteral("403")));
+
+    REQUIRE(UpdateChecker::httpFailureReason(404, {}, {}, {}, QString())
+                .contains(QStringLiteral("404")));
+}

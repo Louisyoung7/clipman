@@ -30,6 +30,45 @@ namespace {
 constexpr auto kRepoOwner = "Louisyoung7";
 constexpr auto kRepoName = "clipman";
 
+QString gsettingsGet(const QString &schema, const QString &key)
+{
+    QProcess process;
+    process.start(QStringLiteral("gsettings"), {QStringLiteral("get"), schema, key});
+    if (!process.waitForStarted(500) || !process.waitForFinished(1500))
+        return {};
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return {};
+
+    QString value = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    if (value.size() >= 2 && value.startsWith(QLatin1Char('\'')) &&
+        value.endsWith(QLatin1Char('\'')))
+        value = value.mid(1, value.size() - 2);
+    return value;
+}
+
+// Qt 6 在 Linux 上不再内置 libproxy，systemProxyForQuery() 只读环境变量，
+// 所以「跟随系统」还需要补读 GNOME 桌面的代理设置。
+QNetworkProxy gnomeProxy()
+{
+    if (gsettingsGet(QStringLiteral("org.gnome.system.proxy"), QStringLiteral("mode")) !=
+        QLatin1String("manual"))
+        return QNetworkProxy(QNetworkProxy::NoProxy);
+
+    auto readProxy = [](const QString &schema) {
+        const QString host = gsettingsGet(schema, QStringLiteral("host"));
+        const int port = gsettingsGet(schema, QStringLiteral("port")).toInt();
+        return QNetworkProxy(QNetworkProxy::HttpProxy, host,
+                             static_cast<quint16>(qBound(0, port, 65535)));
+    };
+
+    QNetworkProxy proxy = readProxy(QStringLiteral("org.gnome.system.proxy.https"));
+    if (proxy.hostName().isEmpty())
+        proxy = readProxy(QStringLiteral("org.gnome.system.proxy.http"));
+    if (proxy.hostName().isEmpty() || proxy.port() == 0)
+        return QNetworkProxy(QNetworkProxy::NoProxy);
+    return proxy;
+}
+
 } // namespace
 
 SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
@@ -58,9 +97,10 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
     generalForm->addRow(tr("全局快捷键"), m_hotkeyEdit);
     generalLayout->addLayout(generalForm);
 
-    auto *hotkeyHint =
-        new QLabel(tr("需包含 Ctrl / Alt / Super，仅支持单组组合键；系统或其他应用已占用的组合无法录制，请换一个空闲组合。"),
-                   generalGroup);
+    auto *hotkeyHint = new QLabel(
+        tr("需包含 Ctrl / Alt / "
+           "Super，仅支持单组组合键；系统或其他应用已占用的组合无法录制，请换一个空闲组合。"),
+        generalGroup);
     hotkeyHint->setWordWrap(true);
     generalLayout->addWidget(hotkeyHint);
     layout->addWidget(generalGroup);
@@ -134,8 +174,7 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
                 m_hotkeyEdit->setKeySequence(QKeySequence(sequence[0]));
             });
     connect(m_hotkeyEdit, &QKeySequenceEdit::editingFinished, this, [this] {
-        const QString sequence =
-            m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+        const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
         if (sequence == m_appliedSequence)
             return;
         if (!applyHotkeySequence(sequence))
@@ -250,8 +289,8 @@ void SettingsDialog::loadSettings()
         settings.value(QStringLiteral("history/maxEntries"), Store::kDefaultRetention).toInt());
 
     m_appliedSequence =
-        settings.value(QStringLiteral("hotkey/sequence"),
-                       QString::fromLatin1(kDefaultHotkeySequence))
+        settings
+            .value(QStringLiteral("hotkey/sequence"), QString::fromLatin1(kDefaultHotkeySequence))
             .toString();
     {
         const QSignalBlocker blocker(m_hotkeyEdit);
@@ -303,10 +342,16 @@ QNetworkProxy SettingsDialog::resolvedProxy() const
         return QNetworkProxy(type, host, static_cast<quint16>(m_proxyPort->value()));
     }
 
-    // 跟随系统：读取 http_proxy/https_proxy 或桌面环境配置。
+    // 跟随系统：优先环境变量 / Qt 系统配置，取不到再读 GNOME 桌面代理。
     const QList<QNetworkProxy> proxies = QNetworkProxyFactory::systemProxyForQuery(
         QNetworkProxyQuery(QUrl(QStringLiteral("https://api.github.com"))));
-    return proxies.isEmpty() ? QNetworkProxy(QNetworkProxy::NoProxy) : proxies.first();
+    if (!proxies.isEmpty() && !proxies.first().hostName().isEmpty())
+        return proxies.first();
+
+    const QNetworkProxy desktopProxy = gnomeProxy();
+    if (desktopProxy.type() != QNetworkProxy::NoProxy)
+        return desktopProxy;
+    return QNetworkProxy(QNetworkProxy::NoProxy);
 }
 
 void SettingsDialog::checkForUpdates()

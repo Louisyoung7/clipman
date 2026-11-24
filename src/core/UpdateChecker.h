@@ -41,6 +41,13 @@ public:
     static bool isNewer(const QString &candidate, const QString &current);
     static ReleaseInfo parseLatestRelease(const QByteArray &json);
 
+    // 网页接口（不消耗 API 速率额度），用于 GitHub API 被限流时的兜底。
+    static QString tagFromReleaseUrl(const QUrl &url);
+    static ReleaseInfo parseAssetsHtml(const QByteArray &html, const QString &tagName);
+    static QString httpFailureReason(int status, const QByteArray &rateRemaining,
+                                     const QByteArray &rateReset, const QByteArray &retryAfter,
+                                     const QString &errorText);
+
 signals:
     void updateAvailable(const ReleaseInfo &info);
     void upToDate(const QString &latestVersion);
@@ -51,9 +58,12 @@ signals:
 
 private:
     void verifyChecksum(const ReleaseInfo &info, const QString &path);
+    void startWebFallback(const QString &owner, const QString &repo, const QString &currentVersion,
+                          const QString &apiFailure);
 
     QNetworkAccessManager m_network;
     QNetworkReply *m_checkReply = nullptr;
+    QNetworkReply *m_webReply = nullptr;
     QNetworkReply *m_downloadReply = nullptr;
     QFile *m_downloadFile = nullptr;
     QString m_downloadPath;

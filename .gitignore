@@ -1,0 +1,24 @@
+# 构建产物
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# clangd / IDE 缓存
+.cache/
+.vscode/
+.idea/
+*.user
+
+# 本地运行产物
+*.db
+*.db-wal
+*.db-shm
+*.lock
+
+# 对象与二进制
+*.o
+*.so
+*.a

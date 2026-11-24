@@ -25,7 +25,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 ### 明确不做（MVP 阶段）
 
 - QML/Quick 界面（Widgets 足够）
-- 云同步、多设备（`Qt6::Network` 不引入）
+- 云同步、多设备（`Qt6::Network` 仅用于 GitHub 更新检查，不做数据同步）
 - Flatpak 分发（沙箱会阻断 selection owner 接管）
 - OCR、二维码、语法高亮、崩溃上报
 
@@ -57,7 +57,8 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 - ✅ M2：图片落盘 `blobs/<hash>.png` + 缩略图，裁剪/删除/清空同步清理
 - ✅ M2：`QtConcurrent` 异步哈希、图片解码与缩略图
 - ✅ M2：D-Bus 单实例唤醒 + 托盘「暂停记录」
-- ✅ M3：`tests/`（Catch2 + QtTest，14 个用例）接入 CTest
+- ✅ 0.4：托盘「设置」面板 + 检查更新（GitHub Releases → 下载 deb → pkexec 安装）
+- ✅ M3：`tests/`（Catch2 + QtTest，17 个用例）接入 CTest
 - ✅ M3：`.clang-format` / `.clang-tidy`，`-Wall -Wextra -Wpedantic` 零警告构建
 - ✅ M3：SVG 图标、`.desktop`、`/etc/xdg/autostart` 自启项、托盘「开机自启」开关
 - ✅ M3：CPack 生成 deb（AppImage 按决策延后）
@@ -119,7 +120,8 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 | `Qt6::Concurrent` 已用于图片哈希/缩放 | 大图处理已离开 GUI 线程 | 已解决 |
 | 全局快捷键在 Wayland 受限 | 当前目标平台是 X11，可接受 | 记录在 M4 |
 | 图片以字节哈希去重 | 同一图片经不同编码（PNG/JPEG）会存成两条 | 已接受，M2 范围内不做感知哈希 |
-| deb 基于本机 Qt 6.8.3 构建 | 包只在装有同版本 Qt 的环境可运行（Ubuntu 24.04 官方 Qt 为 6.4.2） | 正式发行需在装有 `qt6-base-dev` 的环境重新打包 |
+| 更新检查依赖 GitHub Releases API | 未认证配额 60 次/小时，触发限流时无法检查 | 提示稍后重试，不做本地缓存 |
+| deb 构建环境 | 本地手动打包依赖本机 Qt 6.8.3；正式发行需用 CI（Ubuntu 24.04 系统 Qt 6.4.2）产物 | GitHub Actions 已配置，发布用其 artifact |
 
 ## 7. 完成定义（DoD）
 
@@ -154,7 +156,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 | `Qt6::Concurrent` | 图片缩放、哈希挪出 GUI 线程 | 必需（M2 起实际使用） |
 | `Qt6::Svg` | 托盘与格式图标 | 推荐 |
 | `Qt6::DBus` | 单实例、桌面通知、快捷键 | 推荐 |
-| `Qt6::Network` | 同步/云备份 | 可选，不进 MVP |
+| `Qt6::Network` | GitHub Releases 更新检查与 deb 下载 | 必需（0.4 起使用） |
 | `Qt6::Qml` + `Quick` | 现代化动画面板 | 可选，MVP 不上 |
 
 ### A.3 X11 原生层职责

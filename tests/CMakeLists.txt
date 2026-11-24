@@ -1,6 +1,7 @@
 include(Catch)
 
-add_executable(tst_core core/main.cpp core/tst_store.cpp core/tst_blobstore.cpp)
+add_executable(tst_core core/main.cpp core/tst_store.cpp core/tst_blobstore.cpp
+                        core/tst_update_checker.cpp)
 target_link_libraries(tst_core PRIVATE clipman_core Catch2::Catch2 clipman_warnings)
 catch_discover_tests(tst_core)
 

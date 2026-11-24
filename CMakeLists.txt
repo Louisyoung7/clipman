@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # 版本号单一真源；打 tag 时 CI 用 -DCLIPMAN_VERSION=<tag 去掉 v> 覆盖。
-set(CLIPMAN_VERSION "0.3.0" CACHE STRING "Clipman 应用版本号")
+set(CLIPMAN_VERSION "0.4.0" CACHE STRING "Clipman 应用版本号")
 
 project(Clipman VERSION ${CLIPMAN_VERSION} LANGUAGES CXX)
 
@@ -11,7 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # 打包/安装后的二进制不携带指向本机 Qt 安装目录的 RUNPATH。
 set(CMAKE_SKIP_INSTALL_RPATH ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Gui Sql Concurrent DBus)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Gui Sql Concurrent DBus Network)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb xcb-xfixes)
@@ -32,9 +32,11 @@ qt_add_library(clipman_core STATIC
     src/core/Entry.h
     src/core/Store.h
     src/core/Store.cpp
+    src/core/UpdateChecker.h
+    src/core/UpdateChecker.cpp
 )
 target_include_directories(clipman_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(clipman_core PUBLIC Qt6::Gui Qt6::Sql Qt6::Concurrent)
+target_link_libraries(clipman_core PUBLIC Qt6::Gui Qt6::Sql Qt6::Concurrent Qt6::Network)
 target_link_libraries(clipman_core PRIVATE clipman_warnings)
 
 qt_add_executable(clipman
@@ -52,6 +54,8 @@ qt_add_executable(clipman
     src/platform/XcbClipboardWatcher.cpp
     src/ui/HistoryWindow.h
     src/ui/HistoryWindow.cpp
+    src/ui/SettingsDialog.h
+    src/ui/SettingsDialog.cpp
     src/ui/TrayController.h
     src/ui/TrayController.cpp
 )

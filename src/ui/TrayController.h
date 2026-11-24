@@ -23,6 +23,7 @@ signals:
     void quitRequested();
     void pauseToggled(bool paused);
     void autostartToggled(bool enabled);
+    void settingsRequested();
 
 private:
     HistoryWindow *m_window = nullptr;

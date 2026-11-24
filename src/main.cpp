@@ -20,6 +20,7 @@
 #include "platform/X11Hotkey.h"
 #include "platform/XcbClipboardWatcher.h"
 #include "ui/HistoryWindow.h"
+#include "ui/SettingsDialog.h"
 #include "ui/TrayController.h"
 
 int main(int argc, char *argv[])
@@ -136,6 +137,10 @@ int main(int argc, char *argv[])
     QObject::connect(&tray, &TrayController::clearRequested, &window, [&] {
         store.clearAll();
         window.refresh();
+    });
+    QObject::connect(&tray, &TrayController::settingsRequested, &window, [&window] {
+        SettingsDialog dialog(&window);
+        dialog.exec();
     });
     QObject::connect(&tray, &TrayController::quitRequested, &app, &QApplication::quit);
 

@@ -59,6 +59,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
     QAction *pauseAction = m_menu->addAction(tr("暂停记录"));
     pauseAction->setCheckable(true);
     QAction *clearAction = m_menu->addAction(tr("清空历史"));
+    QAction *settingsAction = m_menu->addAction(tr("设置…"));
     m_menu->addSeparator();
     QAction *quitAction = m_menu->addAction(tr("退出"));
     m_tray->setContextMenu(m_menu);
@@ -70,6 +71,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
         emit pauseToggled(paused);
     });
     connect(clearAction, &QAction::triggered, this, &TrayController::clearRequested);
+    connect(settingsAction, &QAction::triggered, this, &TrayController::settingsRequested);
     connect(quitAction, &QAction::triggered, this, &TrayController::quitRequested);
 
     connect(m_tray, &QSystemTrayIcon::activated, this,

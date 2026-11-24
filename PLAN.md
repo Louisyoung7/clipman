@@ -44,7 +44,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 
 ## 4. 当前状态
 
-首个提交 `2b5864e` 完成最小闭环，**M1 交互可用、M2 多格式与健壮性、M3 工程化与分发均已完成**：
+首个提交 `2b5864e` 完成最小闭环，**M1 交互可用、M2 多格式与健壮性、M3 工程化与分发、M4 配置化均已完成（0.5.0）**：
 
 - ✅ XFixes 监听 + TARGETS 枚举 + INCR，QClipboard 兜底
 - ✅ SQLite 存储：WAL、SHA-256 去重、1000 条裁剪
@@ -62,6 +62,8 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 - ✅ M3：`.clang-format` / `.clang-tidy`，`-Wall -Wextra -Wpedantic` 零警告构建
 - ✅ M3：SVG 图标、`.desktop`、`/etc/xdg/autostart` 自启项、托盘「开机自启」开关
 - ✅ M3：CPack 生成 deb（AppImage 按决策延后）
+- ✅ M4：保留条数可配置（100–10000），修改后立即裁剪并持久化
+- ✅ M4：全局快捷键可配置（`X11Hotkey::apply`），冲突时回滚 UI 与旧 grab
 
 ## 5. 里程碑
 
@@ -103,22 +105,33 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 
 验收：`ctest` 全绿；安装后应用菜单可见、开机自启、卸载不残留数据目录外的文件。
 
-### M4 可选增强（P3）
+### M4 配置化（P3）
 
-- [ ] 设置窗口：保留条数、快捷键、忽略应用列表
-- [ ] 语义化增强：`KSyntaxHighlighting` 预览、`libqrencode` 文本转二维码
-- [ ] i18n：`qt6-l10n-tools` + Linguist
-- [ ] Wayland backend + Global Shortcuts portal（仅当要脱离 X11）
+目标：把当前写死的两个参数交给用户。复用已有设置对话框（[SettingsDialog.cpp](src/ui/SettingsDialog.cpp)），不新建窗口。**已完成。**
+
+- [x] 「通用」组增加**保留条数**：`QSpinBox`（100–10000，默认 1000）。`Store` 用可设置的成员替换 `kMaxEntries` 常量，保存后立即裁剪一次
+- [x] 「通用」组增加**全局快捷键**：键位捕获控件；`X11Hotkey` 改为接受 keysym 与修饰键参数，改键时先 ungrab 旧键再 grab 新键，注册失败则回滚 UI 并提示占用
+- [x] 补充测试：`Store::setMaxEntries()` 的裁剪边界；键位字符串 → keysym/修饰键的解析（纯逻辑，可单测）
+
+验收：改成 200 条后历史立即裁到 200，重启保持；快捷键改为 `Ctrl+Shift+Space` 后旧键失效、新键唤起；目标键位被占用时配置不被写坏。
+
+**不在 M4 内（后续候选）**
+
+- 忽略应用列表：需读 selection owner 的 `_NET_WM_PID`/`WM_CLASS`，且要记住条目来源（schema v4）；部分应用借用隐藏窗口，可靠性有限
+- 文本转二维码：可选 `libqrencode` 依赖（apt 4.1.1 可用）
+- i18n：`qt6-l10n-tools` + .ts；面向外部用户后再做
+- ~~`KSyntaxHighlighting` 预览~~：为装饰性预览引入 KF6 依赖不划算，决定不做。如需美化，用等宽字体 + JSON/XML 格式化自实现
 
 ## 6. 已知问题与风险
 
 | 项 | 影响 | 处理 |
 | --- | --- | --- |
-| 快捷键固定为 `Ctrl+Alt+V` | 无法按个人习惯调整 | M4 设置窗口提供配置 |
+| 快捷键固定为 `Ctrl+Alt+V` | 无法按个人习惯调整 | 已解决（M4 可配置） |
 | INCR 单块超时 2s，无整体进度反馈 | 超大内容可能被截断且静默丢弃 | 维持静默丢弃，不引入桌面通知（M2 结论） |
 | 单实例已改 D-Bus，无 session bus 回退 QLockFile | 精简环境下二次启动仍无唤醒 | 可接受，记录在案 |
 | `Qt6::Concurrent` 已用于图片哈希/缩放 | 大图处理已离开 GUI 线程 | 已解决 |
-| 全局快捷键在 Wayland 受限 | 当前目标平台是 X11，可接受 | 记录在 M4 |
+| 全局快捷键在 Wayland 受限 | Wayland 下 `grab_key` 无效 | 明确不支持 Wayland（见下条） |
+| Wayland + GNOME 缺少 `wlr-data-control` | 历史管理器读不到其他应用的剪贴板，非"排期能解决"而是能力不可达 | 不作为目标平台；若将来支持，仅限 KDE/wlroots 并单独立项 |
 | 图片以字节哈希去重 | 同一图片经不同编码（PNG/JPEG）会存成两条 | 已接受，M2 范围内不做感知哈希 |
 | 更新检查依赖 GitHub Releases API | 未认证配额 60 次/小时，触发限流时无法检查 | 提示稍后重试，不做本地缓存 |
 | deb 构建环境 | 本地手动打包依赖本机 Qt 6.8.3；正式发行需用 CI（Ubuntu 24.04 系统 Qt 6.4.2）产物 | GitHub Actions 已配置，发布用其 artifact |

@@ -39,15 +39,11 @@ X11Hotkey::~X11Hotkey()
     if (m_filterInstalled && qApp)
         qApp->removeNativeEventFilter(this);
 
-    if (!m_conn || m_window == XCB_NONE)
+    if (!m_conn || m_root == XCB_NONE || !m_active)
         return;
 
-    if (m_active) {
-        for (quint16 modifier : m_modifiers)
-            xcb_ungrab_key(m_conn, m_keycode, m_window, modifier);
-    }
-
-    xcb_destroy_window(m_conn, m_window);
+    for (quint16 modifier : m_modifiers)
+        xcb_ungrab_key(m_conn, m_keycode, m_root, modifier);
     xcb_flush(m_conn);
 }
 
@@ -57,11 +53,8 @@ bool X11Hotkey::initialize()
     if (!screen.data)
         return false;
 
-    m_window = xcb_generate_id(m_conn);
-    const uint32_t eventMask = XCB_EVENT_MASK_KEY_PRESS;
-    xcb_create_window(m_conn, 0, m_window, screen.data->root, 0, 0, 1, 1, 0,
-                      XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT,
-                      XCB_CW_EVENT_MASK, &eventMask);
+    // passive key grab 只有挂在 root 上才是全局的；挂在自建窗口上不会触发。
+    m_root = screen.data->root;
 
     if (!findKeycode() || !grabAll())
         return false;
@@ -117,7 +110,7 @@ bool X11Hotkey::grabAll()
     bool anyGrabbed = false;
     for (quint16 modifier : m_modifiers) {
         const xcb_void_cookie_t cookie = xcb_grab_key_checked(
-            m_conn, 1, m_window, modifier, m_keycode,
+            m_conn, 0, m_root, modifier, m_keycode,
             XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
         if (xcb_generic_error_t *error = xcb_request_check(m_conn, cookie)) {
             free(error);

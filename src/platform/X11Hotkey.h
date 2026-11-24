@@ -34,7 +34,7 @@ private:
     bool grabAll();
 
     xcb_connection_t *m_conn = nullptr;
-    xcb_window_t m_window = XCB_NONE;
+    xcb_window_t m_root = XCB_NONE;
     xcb_keycode_t m_keycode = 0;
     QVector<quint16> m_modifiers;
     bool m_active = false;

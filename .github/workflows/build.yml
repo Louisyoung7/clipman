@@ -1,0 +1,70 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            qt6-base-dev libqt6sql6-sqlite libqt6svg6 \
+            libxcb1-dev libxcb-xfixes0-dev libxcb-icccm4-dev libxfixes-dev \
+            catch2 desktop-file-utils
+
+      - name: 配置
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: 构建（零警告门槛）
+        run: |
+          set -o pipefail
+          cmake --build build --parallel "$(nproc)" 2>&1 | tee build.log
+          if grep -qi 'warning:' build.log; then
+            echo '::error::构建出现警告'
+            grep -i 'warning:' build.log | head -20
+            exit 1
+          fi
+
+      - name: 测试
+        run: ctest --test-dir build --output-on-failure
+
+      - name: 校验 desktop 文件
+        run: |
+          desktop-file-validate packaging/clipman.desktop
+          desktop-file-validate packaging/clipman-autostart.desktop
+
+      - name: 打包 deb
+        run: cpack --config build/CPackConfig.cmake -B build/package
+
+      - name: 检查 deb 内容
+        run: |
+          deb=$(ls build/package/*.deb | head -1)
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb"
+          dpkg-deb -x "$deb" /tmp/clipman-root
+          if readelf -d /tmp/clipman-root/usr/bin/clipman | grep -qi runpath; then
+            echo '::error::deb 内二进制仍带 RUNPATH'
+            exit 1
+          fi
+
+      - name: 上传 deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipman-deb
+          path: build/package/*.deb
+          if-no-files-found: error

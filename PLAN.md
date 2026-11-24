@@ -44,27 +44,30 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 
 ## 4. 当前状态
 
-首个提交 `2b5864e` 已完成最小闭环：
+首个提交 `2b5864e` 完成最小闭环，**M1 交互可用已完成**：
 
 - ✅ XFixes 监听 + TARGETS 枚举 + INCR，QClipboard 兜底
-- ✅ SQLite 存储：WAL、SHA-256 去重、v1 迁移、1000 条裁剪
-- ✅ 托盘菜单 + 历史列表 + 清空
-- ❌ 无全局快捷键 → 只能点托盘，可用性不足
-- ❌ 只有纯文本；无搜索；无图片/文件
-- ❌ 无测试、无格式化配置、无 `.desktop`、无打包
+- ✅ SQLite 存储：WAL、SHA-256 去重、1000 条裁剪
+- ✅ M1：X11 全局快捷键 `Ctrl+Alt+V`（`grab_key` 挂在 root window）
+- ✅ M1：弹出式面板，搜索框 + `↑/↓`、`Enter`、`Esc`、单击复制
+- ✅ M1：FTS5 检索（schema v2），输入即搜
+- ✅ M1：单条删除（`Delete` / 右键菜单）
+- ✅ M1：修复 `suppressNext()` 与 `m_owner` 同步，回填不再重复入库
+- ❌ 仅纯文本；无图片/文件（M2）
+- ❌ 无测试、无格式化配置、无 `.desktop`、无打包（M3）
 
 ## 5. 里程碑
 
 ### M1 交互可用（P0）
 
-目标：不用鼠标也能完成"唤起 → 搜索 → 回填"。
+目标：不用鼠标也能完成"唤起 → 搜索 → 回填"。**已完成。**
 
-- [ ] 全局快捷键唤起面板：优先 Global Shortcuts portal，X11 下用 xcb `grab_key` 兜底
-- [ ] 面板改造：顶部搜索框 + 列表，`↑/↓` 移动、`Enter` 复制、`Esc` 关闭、失焦自动隐藏
-- [ ] 单击即复制（现在只有双击/回车触发 `itemActivated`）
-- [ ] FTS5 虚拟表 + `Store::search()`，写入时同步索引，迁移升到 v2
-- [ ] 单条删除：`Delete` 键 + 右键菜单
-- [ ] 修复 `XcbClipboardWatcher::suppressNext()` 空实现，回填时同步 `m_owner`
+- [x] 全局快捷键唤起面板：X11 `grab_key` 注册 `Ctrl+Alt+V`（portal 延后到 M4）
+- [x] 面板改造：顶部搜索框 + 列表，`↑/↓` 移动、`Enter` 复制、`Esc` 关闭、失焦自动隐藏
+- [x] 单击即复制（原先只有双击/回车触发 `itemActivated`）
+- [x] FTS5 虚拟表 + `Store::search()`，写入时同步索引，迁移升到 v2
+- [x] 单条删除：`Delete` 键 + 右键菜单
+- [x] 修复 `XcbClipboardWatcher::suppressNext()` 空实现，回填时同步 `m_owner`
 
 验收：复制一段文本后按快捷键，面板立即出现且焦点在搜索框；输入关键词能命中；回车回填后历史不新增重复条目。
 
@@ -94,14 +97,13 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 - [ ] 设置窗口：保留条数、快捷键、忽略应用列表
 - [ ] 语义化增强：`KSyntaxHighlighting` 预览、`libqrencode` 文本转二维码
 - [ ] i18n：`qt6-l10n-tools` + Linguist
-- [ ] Wayland backend（仅当要脱离 X11）
+- [ ] Wayland backend + Global Shortcuts portal（仅当要脱离 X11）
 
 ## 6. 已知问题与风险
 
 | 项 | 影响 | 处理 |
 | --- | --- | --- |
-| `suppressNext()` 在 XCB 后端为空 | 回填历史可能重复入库 | M1 内修复 |
-| `m_owner` 不记录自身取权 | 后续 owner 判断可能失准 | M1 内修复 |
+| 快捷键固定为 `Ctrl+Alt+V` | 无法按个人习惯调整 | M4 设置窗口提供配置 |
 | INCR 单块超时 2s，无整体进度反馈 | 超大内容可能被截断且静默丢弃 | M2 评估是否需要提示 |
 | 单实例用 QLockFile，无唤醒 | 二次启动表现为"什么都没发生" | M2 换 D-Bus |
 | `Qt6::Concurrent` 已链接未使用 | 图片功能接入时才有实际用途 | M2 落地 |

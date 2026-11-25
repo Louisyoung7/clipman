@@ -50,6 +50,7 @@ private:
                        const QString &otherApplied, const QString &otherName);
     static void restoreSequence(QKeySequenceEdit *edit, const QString &sequence);
     void syncPendingSequences();
+    void positionNearCursor();
     void setBusy(bool busy);
     void setStatus(const QString &text);
 
@@ -73,5 +74,5 @@ private:
     HotkeyApplier m_hotkeyApplier;
     HotkeyApplier m_settingsHotkeyApplier;
     bool m_busy = false;
-    bool m_positionedAtCursor = false;
+    bool m_repositionedAfterShow = false;
 };

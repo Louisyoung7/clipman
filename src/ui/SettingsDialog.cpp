@@ -26,6 +26,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "core/Store.h"
@@ -249,6 +250,11 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier,
 
     // 用于「点击设置界面外部自动关闭」：需要监听整个应用的事件。
     qApp->installEventFilter(this);
+
+    // 在窗口映射之前显式定位，交给窗口管理器 USPosition 提示，
+    // 避免多屏下按父窗口/主屏重新摆放。
+    adjustSize();
+    positionNearCursor();
 }
 
 SettingsDialog::~SettingsDialog()
@@ -273,11 +279,16 @@ void SettingsDialog::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
 
-    // 首次显示时把对话框放到鼠标附近，并保证整窗落在鼠标所在屏幕的可用区域内。
-    if (m_positionedAtCursor)
+    // 窗口映射后窗口管理器仍可能重新摆放（GNOME 的 attach-modal-dialogs 会按父窗口所在屏居中），
+    // 在事件循环末尾再校正一次位置。
+    if (m_repositionedAfterShow)
         return;
-    m_positionedAtCursor = true;
+    m_repositionedAfterShow = true;
+    QTimer::singleShot(0, this, [this] { positionNearCursor(); });
+}
 
+void SettingsDialog::positionNearCursor()
+{
     const QPoint cursor = QCursor::pos();
     const QScreen *screen = QGuiApplication::screenAt(cursor);
     if (!screen)
@@ -285,6 +296,7 @@ void SettingsDialog::showEvent(QShowEvent *event)
     if (!screen)
         return;
 
+    // 以鼠标为中心放置，并保证整窗落在鼠标所在屏幕的可用区域内。
     const QRect available = screen->availableGeometry();
     const int maxX = qMax(available.left(), available.right() - width() + 1);
     const int maxY = qMax(available.top(), available.bottom() - height() + 1);

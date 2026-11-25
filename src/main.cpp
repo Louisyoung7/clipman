@@ -180,7 +180,9 @@ int main(int argc, char *argv[])
         if (window.isVisible())
             window.hide();
 
-        SettingsDialog dialog(&window, applyHotkey, applySettingsHotkey);
+        // 不设置父窗口：GNOME 的 attach-modal-dialogs 会把模态对话框
+        // 贴到父窗口所在屏幕，多屏时容易跑到副屏。位置由对话框自身按鼠标定位。
+        SettingsDialog dialog(nullptr, applyHotkey, applySettingsHotkey);
         dialog.exec();
 
         // 关闭后按已保存的配置恢复两个全局快捷键（对话框内可能刚应用过新键）。

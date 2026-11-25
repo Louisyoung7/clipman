@@ -6,8 +6,12 @@
 
 // 默认全局快捷键；设置中未配置时使用。
 inline constexpr char kDefaultHotkeySequence[] = "Ctrl+Alt+V";
-// 打开设置界面的固定全局快捷键。
+// 打开设置界面的默认全局快捷键；设置中未配置时使用。
 inline constexpr char kDefaultSettingsHotkeySequence[] = "Ctrl+Alt+C";
+
+// QSettings 键名；主程序与设置对话框共用，避免两处写法不一致。
+inline constexpr char kHotkeySequenceKey[] = "hotkey/sequence";
+inline constexpr char kSettingsHotkeySequenceKey[] = "settingsHotkey/sequence";
 
 // 平台无关的快捷键描述：Qt::Key + 修饰键。
 // 与 X11 keysym 的换算见 x11KeysymForQtKey()，不依赖 xcb 头，便于单测。

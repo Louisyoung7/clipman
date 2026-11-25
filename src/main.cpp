@@ -89,10 +89,17 @@ int main(int argc, char *argv[])
         return applyTo(hotkey.get(), sequence, hotkeyError);
     };
 
-    const QString savedHotkey =
-        settings.value(QStringLiteral("hotkey/sequence"),
-                       QString::fromLatin1(kDefaultHotkeySequence))
+    auto applySettingsHotkey = [&](const QString &sequence, QString *hotkeyError) -> bool {
+        return applyTo(settingsHotkey.get(), sequence, hotkeyError);
+    };
+
+    auto readSequence = [](const char *key, const char *fallback) {
+        return QSettings()
+            .value(QString::fromLatin1(key), QString::fromLatin1(fallback))
             .toString();
+    };
+
+    const QString savedHotkey = readSequence(kHotkeySequenceKey, kDefaultHotkeySequence);
     QString hotkeyError;
     if (!applyHotkey(savedHotkey, &hotkeyError))
         qWarning() << "全局快捷键不可用:" << hotkeyError; // 不静默改写用户配置
@@ -100,8 +107,8 @@ int main(int argc, char *argv[])
         QObject::connect(hotkey.get(), &X11Hotkey::activated, &window, &HistoryWindow::togglePanel);
 
     QString settingsHotkeyError;
-    if (!applyTo(settingsHotkey.get(), QString::fromLatin1(kDefaultSettingsHotkeySequence),
-                 &settingsHotkeyError))
+    if (!applySettingsHotkey(readSequence(kSettingsHotkeySequenceKey, kDefaultSettingsHotkeySequence),
+                             &settingsHotkeyError))
         qWarning() << "设置快捷键不可用:" << settingsHotkeyError;
 
     bool paused = false;
@@ -173,21 +180,18 @@ int main(int argc, char *argv[])
         if (window.isVisible())
             window.hide();
 
-        SettingsDialog dialog(&window, applyHotkey);
+        SettingsDialog dialog(&window, applyHotkey, applySettingsHotkey);
         dialog.exec();
 
-        // 关闭后按已保存的配置恢复全局快捷键（对话框内可能刚应用过新键）。
-        const QString sequence = QSettings()
-                                     .value(QStringLiteral("hotkey/sequence"),
-                                            QString::fromLatin1(kDefaultHotkeySequence))
-                                     .toString();
+        // 关闭后按已保存的配置恢复两个全局快捷键（对话框内可能刚应用过新键）。
         QString restoreError;
-        if (!applyHotkey(sequence, &restoreError))
+        if (!applyHotkey(readSequence(kHotkeySequenceKey, kDefaultHotkeySequence), &restoreError))
             qWarning() << "全局快捷键恢复失败:" << restoreError;
 
         QString settingsRestoreError;
-        if (!applyTo(settingsHotkey.get(), QString::fromLatin1(kDefaultSettingsHotkeySequence),
-                     &settingsRestoreError))
+        if (!applySettingsHotkey(
+                readSequence(kSettingsHotkeySequenceKey, kDefaultSettingsHotkeySequence),
+                &settingsRestoreError))
             qWarning() << "设置快捷键恢复失败:" << settingsRestoreError;
 
         const int retention = QSettings()

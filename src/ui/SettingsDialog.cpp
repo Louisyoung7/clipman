@@ -3,11 +3,13 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeySequenceEdit>
 #include <QLabel>
@@ -18,7 +20,9 @@
 #include <QNetworkProxyQuery>
 #include <QProcess>
 #include <QPushButton>
+#include <QScreen>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -73,9 +77,11 @@ QNetworkProxy gnomeProxy()
 
 } // namespace
 
-SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
+SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier,
+                               HotkeyApplier settingsHotkeyApplier)
     : QDialog(parent)
     , m_hotkeyApplier(hotkeyApplier)
+    , m_settingsHotkeyApplier(settingsHotkeyApplier)
 {
     setWindowTitle(tr("Clipman 设置"));
     setMinimumWidth(460);
@@ -99,7 +105,11 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
     // 桌面里存在常驻程序在窗口层面主动抓取键盘，纯 Alt 组合键（如 Alt+C）到不了录制框，
     // 只会收到 Alt 本身；因此聚焦录制框时主动抓取键盘，抢在其他程序之前收到按键。
     m_hotkeyEdit->installEventFilter(this);
-    generalForm->addRow(tr("全局快捷键"), m_hotkeyEdit);
+    generalForm->addRow(tr("打开历史的快捷键"), m_hotkeyEdit);
+
+    m_settingsHotkeyEdit = new QKeySequenceEdit(generalGroup);
+    m_settingsHotkeyEdit->installEventFilter(this);
+    generalForm->addRow(tr("打开设置的快捷键"), m_settingsHotkeyEdit);
     generalLayout->addLayout(generalForm);
 
     auto *hotkeyHint = new QLabel(
@@ -178,12 +188,29 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier)
                 const QSignalBlocker blocker(m_hotkeyEdit);
                 m_hotkeyEdit->setKeySequence(QKeySequence(sequence[0]));
             });
+    connect(m_settingsHotkeyEdit, &QKeySequenceEdit::keySequenceChanged, this,
+            [this](const QKeySequence &sequence) {
+                if (sequence.count() <= 1)
+                    return;
+                const QSignalBlocker blocker(m_settingsHotkeyEdit);
+                m_settingsHotkeyEdit->setKeySequence(QKeySequence(sequence[0]));
+            });
     connect(m_hotkeyEdit, &QKeySequenceEdit::editingFinished, this, [this] {
         const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
         if (sequence == m_appliedSequence)
             return;
-        if (!applyHotkeySequence(sequence))
-            restoreHotkeyEdit();
+        if (!applySequence(m_hotkeyEdit, m_hotkeyApplier, &m_appliedSequence,
+                           m_appliedSettingsSequence, tr("打开设置")))
+            restoreSequence(m_hotkeyEdit, m_appliedSequence);
+    });
+    connect(m_settingsHotkeyEdit, &QKeySequenceEdit::editingFinished, this, [this] {
+        const QString sequence =
+            m_settingsHotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+        if (sequence == m_appliedSettingsSequence)
+            return;
+        if (!applySequence(m_settingsHotkeyEdit, m_settingsHotkeyApplier,
+                           &m_appliedSettingsSequence, m_appliedSequence, tr("打开历史")))
+            restoreSequence(m_settingsHotkeyEdit, m_appliedSettingsSequence);
     });
 
     loadSettings();
@@ -233,26 +260,49 @@ void SettingsDialog::done(int result)
 {
     // 关闭前先松开键盘抓取，避免对话框消失后仍然独占键盘。
     m_hotkeyEdit->releaseKeyboard();
+    m_settingsHotkeyEdit->releaseKeyboard();
 
     // 兜底：用户在完成计时器触发前就关闭对话框时，仍同步校验并应用最后一次修改。
-    const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
-    if (sequence != m_appliedSequence && !applyHotkeySequence(sequence))
-        restoreHotkeyEdit();
+    syncPendingSequences();
 
     saveSettings();
     QDialog::done(result);
 }
 
+void SettingsDialog::showEvent(QShowEvent *event)
+{
+    QDialog::showEvent(event);
+
+    // 首次显示时把对话框放到鼠标附近，并保证整窗落在鼠标所在屏幕的可用区域内。
+    if (m_positionedAtCursor)
+        return;
+    m_positionedAtCursor = true;
+
+    const QPoint cursor = QCursor::pos();
+    const QScreen *screen = QGuiApplication::screenAt(cursor);
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return;
+
+    const QRect available = screen->availableGeometry();
+    const int maxX = qMax(available.left(), available.right() - width() + 1);
+    const int maxY = qMax(available.top(), available.bottom() - height() + 1);
+    move(qBound(available.left(), cursor.x() - width() / 2, maxX),
+         qBound(available.top(), cursor.y() - height() / 2, maxY));
+}
+
 bool SettingsDialog::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_hotkeyEdit) {
+    if (watched == m_hotkeyEdit || watched == m_settingsHotkeyEdit) {
+        auto *edit = static_cast<QKeySequenceEdit *>(watched);
         switch (event->type()) {
         case QEvent::FocusIn:
-            m_hotkeyEdit->grabKeyboard();
+            edit->grabKeyboard();
             break;
         case QEvent::FocusOut:
         case QEvent::Hide:
-            m_hotkeyEdit->releaseKeyboard();
+            edit->releaseKeyboard();
             break;
         default:
             break;
@@ -290,49 +340,68 @@ void SettingsDialog::changeEvent(QEvent *event)
 {
     // 窗口失去激活（例如切到别的应用或弹出消息框）时同样松开抓取，
     // 否则键盘会被对话框一直独占。
-    if (event->type() == QEvent::WindowDeactivate)
+    if (event->type() == QEvent::WindowDeactivate) {
         m_hotkeyEdit->releaseKeyboard();
+        m_settingsHotkeyEdit->releaseKeyboard();
+    }
     QDialog::changeEvent(event);
 }
 
-bool SettingsDialog::applyHotkeySequence(const QString &sequence)
+bool SettingsDialog::applySequence(QKeySequenceEdit *edit, const HotkeyApplier &applier,
+                                   QString *applied, const QString &otherApplied,
+                                   const QString &otherName)
 {
+    const QString sequence = edit->keySequence().toString(QKeySequence::PortableText);
+
     // 没有按下有效组合（例如点进输入框后直接失焦）时静默还原，不弹窗打扰。
     if (sequence.isEmpty()) {
-        restoreHotkeyEdit();
+        restoreSequence(edit, *applied);
         return false;
     }
 
-    if (m_hotkeyApplier) {
-        QString error;
-        if (!m_hotkeyApplier(sequence, &error)) {
-            if (error.isEmpty())
-                error = tr("组合键「%1」不可用。").arg(sequence);
-
-            QMessageBox box(this);
-            box.setWindowTitle(tr("快捷键不可用"));
-            box.setIcon(QMessageBox::Warning);
-            box.setText(error);
-            box.setInformativeText(
-                m_appliedSequence.isEmpty()
-                    ? tr("请换一个组合键，例如 Ctrl+Alt+V。")
-                    : tr("请换一个组合键；当前仍使用「%1」。").arg(m_appliedSequence));
-            box.setStandardButtons(QMessageBox::Ok);
-            box.button(QMessageBox::Ok)->setText(tr("知道了"));
-            box.exec();
-            return false;
-        }
+    QString error;
+    if (sequence == otherApplied) {
+        error = tr("组合键「%1」已用于%2，请换一个。").arg(sequence, otherName);
+    } else if (!applier || applier(sequence, &error)) {
+        *applied = sequence;
+        return true;
+    } else if (error.isEmpty()) {
+        error = tr("组合键「%1」不可用。").arg(sequence);
     }
 
-    m_appliedSequence = sequence;
-    return true;
+    QMessageBox box(this);
+    box.setWindowTitle(tr("快捷键不可用"));
+    box.setIcon(QMessageBox::Warning);
+    box.setText(error);
+    box.setInformativeText(applied->isEmpty()
+                               ? tr("请换一个组合键，例如 Ctrl+Alt+V。")
+                               : tr("请换一个组合键；当前仍使用「%1」。").arg(*applied));
+    box.setStandardButtons(QMessageBox::Ok);
+    box.button(QMessageBox::Ok)->setText(tr("知道了"));
+    box.exec();
+    return false;
 }
 
-void SettingsDialog::restoreHotkeyEdit()
+void SettingsDialog::restoreSequence(QKeySequenceEdit *edit, const QString &sequence)
 {
-    const QSignalBlocker blocker(m_hotkeyEdit);
-    m_hotkeyEdit->setKeySequence(
-        QKeySequence::fromString(m_appliedSequence, QKeySequence::PortableText));
+    const QSignalBlocker blocker(edit);
+    edit->setKeySequence(QKeySequence::fromString(sequence, QKeySequence::PortableText));
+}
+
+void SettingsDialog::syncPendingSequences()
+{
+    const QString sequence = m_hotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+    if (sequence != m_appliedSequence &&
+        !applySequence(m_hotkeyEdit, m_hotkeyApplier, &m_appliedSequence,
+                       m_appliedSettingsSequence, tr("打开设置")))
+        restoreSequence(m_hotkeyEdit, m_appliedSequence);
+
+    const QString settingsSequence =
+        m_settingsHotkeyEdit->keySequence().toString(QKeySequence::PortableText);
+    if (settingsSequence != m_appliedSettingsSequence &&
+        !applySequence(m_settingsHotkeyEdit, m_settingsHotkeyApplier, &m_appliedSettingsSequence,
+                       m_appliedSequence, tr("打开历史")))
+        restoreSequence(m_settingsHotkeyEdit, m_appliedSettingsSequence);
 }
 
 void SettingsDialog::loadSettings()
@@ -356,15 +425,16 @@ void SettingsDialog::loadSettings()
     m_retentionSpin->setValue(
         settings.value(QStringLiteral("history/maxEntries"), Store::kDefaultRetention).toInt());
 
-    m_appliedSequence =
-        settings
-            .value(QStringLiteral("hotkey/sequence"), QString::fromLatin1(kDefaultHotkeySequence))
+    m_appliedSequence = settings.value(QString::fromLatin1(kHotkeySequenceKey),
+                                       QString::fromLatin1(kDefaultHotkeySequence))
+                            .toString();
+    restoreSequence(m_hotkeyEdit, m_appliedSequence);
+
+    m_appliedSettingsSequence =
+        settings.value(QString::fromLatin1(kSettingsHotkeySequenceKey),
+                       QString::fromLatin1(kDefaultSettingsHotkeySequence))
             .toString();
-    {
-        const QSignalBlocker blocker(m_hotkeyEdit);
-        m_hotkeyEdit->setKeySequence(
-            QKeySequence::fromString(m_appliedSequence, QKeySequence::PortableText));
-    }
+    restoreSequence(m_settingsHotkeyEdit, m_appliedSettingsSequence);
 
     updateProxyControls();
     const QSignalBlocker blocker(m_autostartCheck);
@@ -380,7 +450,8 @@ void SettingsDialog::saveSettings()
     settings.setValue(QStringLiteral("network/proxyPort"), m_proxyPort->value());
     settings.setValue(QStringLiteral("history/maxEntries"), m_retentionSpin->value());
     // 只保存已成功应用的序列，避免把校验失败的键位写进配置。
-    settings.setValue(QStringLiteral("hotkey/sequence"), m_appliedSequence);
+    settings.setValue(QString::fromLatin1(kHotkeySequenceKey), m_appliedSequence);
+    settings.setValue(QString::fromLatin1(kSettingsHotkeySequenceKey), m_appliedSettingsSequence);
     settings.sync();
 }
 

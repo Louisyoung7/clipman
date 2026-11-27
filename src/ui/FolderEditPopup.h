@@ -42,4 +42,5 @@ private:
     QPushButton *m_okButton = nullptr;
     int m_result = 0;
     bool m_done = false;
+    bool m_composing = false;
 };

@@ -1,15 +1,14 @@
 #include "ui/FolderEditPopup.h"
 
-#include <QApplication>
 #include <QEvent>
 #include <QEventLoop>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHideEvent>
+#include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMouseEvent>
 #include <QPushButton>
 #include <QScreen>
 #include <QShowEvent>
@@ -24,8 +23,9 @@ constexpr int kGap = 4;
 } // namespace
 
 FolderEditPopup::FolderEditPopup(QWidget *parent)
-    : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint)
+    : QWidget(parent, Qt::Dialog | Qt::FramelessWindowHint)
 {
+    // 用普通对话框窗口标志，避免 Qt::Popup 抢键盘导致中文输入法候选框无法工作。
     setObjectName(QStringLiteral("folderEditPopup"));
     setMinimumWidth(260);
     setStyleSheet(QStringLiteral(
@@ -56,7 +56,9 @@ FolderEditPopup::FolderEditPopup(QWidget *parent)
     m_titleLabel->setObjectName(QStringLiteral("folderTitle"));
 
     m_edit = new QLineEdit(this);
+    m_edit->setAttribute(Qt::WA_InputMethodEnabled, true);
     m_edit->setPlaceholderText(tr("输入收藏夹名称"));
+    m_edit->installEventFilter(this);
 
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
@@ -75,13 +77,17 @@ FolderEditPopup::FolderEditPopup(QWidget *parent)
 
     connect(m_okButton, &QPushButton::clicked, this, [this] { finish(kAccepted); });
     connect(cancelButton, &QPushButton::clicked, this, [this] { finish(kRejected); });
-
-    qApp->installEventFilter(this);
 }
 
-FolderEditPopup::~FolderEditPopup()
+FolderEditPopup::~FolderEditPopup() = default;
+
+bool FolderEditPopup::eventFilter(QObject *watched, QEvent *event)
 {
-    qApp->removeEventFilter(this);
+    if (watched == m_edit && event->type() == QEvent::InputMethod) {
+        auto *inputEvent = static_cast<QInputMethodEvent *>(event);
+        m_composing = !inputEvent->preeditString().isEmpty();
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 QString FolderEditPopup::getText(QWidget *parent, const QString &title, const QString &initial,
@@ -103,19 +109,6 @@ QString FolderEditPopup::getText(QWidget *parent, const QString &title, const QS
     return popup.m_result == kAccepted ? popup.m_edit->text().trimmed() : QString();
 }
 
-bool FolderEditPopup::eventFilter(QObject *watched, QEvent *event)
-{
-    if (watched != qApp || !isVisible())
-        return QWidget::eventFilter(watched, event);
-
-    if (event->type() == QEvent::MouseButtonPress) {
-        auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (!frameGeometry().contains(mouseEvent->globalPosition().toPoint()))
-            finish(kRejected);
-    }
-    return QWidget::eventFilter(watched, event);
-}
-
 void FolderEditPopup::hideEvent(QHideEvent *event)
 {
     QWidget::hideEvent(event);
@@ -124,6 +117,12 @@ void FolderEditPopup::hideEvent(QHideEvent *event)
 
 void FolderEditPopup::keyPressEvent(QKeyEvent *event)
 {
+    // 输入法合成中文时，回车/esc 属于选字，不能提前确认或关闭面板。
+    if (m_composing) {
+        QWidget::keyPressEvent(event);
+        return;
+    }
+
     switch (event->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:

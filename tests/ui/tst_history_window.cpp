@@ -240,7 +240,13 @@ void TestHistoryWindow::starLongPressMenuCreatesFolder()
     bool titleOk = false;
     QTimer::singleShot(650, this, [&titleOk] {
         pollUntil([&titleOk] {
-            auto *popup = qobject_cast<FolderEditPopup *>(QApplication::activePopupWidget());
+            FolderEditPopup *popup = nullptr;
+            for (QWidget *widget : QApplication::topLevelWidgets()) {
+                popup = qobject_cast<FolderEditPopup *>(widget);
+                if (popup && popup->isVisible())
+                    break;
+                popup = nullptr;
+            }
             if (!popup)
                 return false;
             auto *label = popup->findChild<QLabel *>(QStringLiteral("folderTitle"));
@@ -261,8 +267,10 @@ void TestHistoryWindow::starLongPressMenuCreatesFolder()
     QTimer::singleShot(4000, this, [] {
         if (QWidget *popup = QApplication::activePopupWidget())
             popup->close();
-        if (QWidget *modal = QApplication::activeModalWidget())
-            modal->close();
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            if (qobject_cast<FolderEditPopup *>(widget))
+                widget->close();
+        }
     });
 
     QTest::mousePress(list->viewport(), Qt::LeftButton, {}, star);

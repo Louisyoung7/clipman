@@ -13,7 +13,7 @@
 #include "platform/HotkeySpec.h"
 
 // 通过 X11 passive grab 注册全局快捷键，支持运行期换键。
-// 仅 X11 可用；Wayland 下 grab_key 无效（见 PLAN.md 已知限制）。
+// 仅 X11 可用；Wayland 下 grab_key 无效（见 archive/PLAN.md 已知限制）。
 class X11Hotkey : public QObject, public QAbstractNativeEventFilter
 {
     Q_OBJECT

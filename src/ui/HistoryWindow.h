@@ -11,6 +11,7 @@
 class FavoriteItemDelegate;
 class QComboBox;
 class QEvent;
+class QHideEvent;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
@@ -35,6 +36,7 @@ signals:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
 
 private:

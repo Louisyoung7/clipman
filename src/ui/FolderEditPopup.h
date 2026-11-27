@@ -21,8 +21,8 @@ public:
     explicit FolderEditPopup(QWidget *parent = nullptr);
     ~FolderEditPopup() override;
 
-    static QString getText(QWidget *parent, const QString &title, const QString &initial,
-                           const QPoint &anchor, bool *ok);
+    static QString getText(const QString &title, const QString &initial, const QPoint &anchor,
+                           bool *ok);
 
 signals:
     void finished();

@@ -1,14 +1,17 @@
 #include "ui/HistoryWindow.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QCursor>
 #include <QDateTime>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLoggingCategory>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -21,6 +24,8 @@
 #include "core/Store.h"
 #include "ui/FavoriteItemDelegate.h"
 #include "ui/FolderEditPopup.h"
+
+Q_LOGGING_CATEGORY(lcHistoryWindow, "clipman.ui.historywindow", QtWarningMsg)
 
 namespace {
 constexpr int kCollapsedTextChars = 120;
@@ -297,6 +302,14 @@ bool HistoryWindow::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+void HistoryWindow::hideEvent(QHideEvent *event)
+{
+    qCDebug(lcHistoryWindow) << "hide, activePopup" << QApplication::activePopupWidget()
+                             << "activeModal" << QApplication::activeModalWidget()
+                             << "focusWindow" << QGuiApplication::focusWindow();
+    QWidget::hideEvent(event);
+}
+
 void HistoryWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
@@ -355,6 +368,8 @@ void HistoryWindow::toggleStar(qint64 entryId)
 
 void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
 {
+    qCDebug(lcHistoryWindow) << "star long pressed" << entryId << globalPos
+                             << "window visible" << isVisible();
     QMenu menu(this);
     const QVector<qint64> current = m_favoriteMap.value(entryId);
     for (const Folder &folder : m_store.folders()) {
@@ -368,6 +383,8 @@ void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
     QAction *manageAction = menu.addAction(tr("管理收藏夹…"));
 
     QAction *chosen = menu.exec(globalPos);
+    qCDebug(lcHistoryWindow) << "star menu chosen"
+                             << (chosen ? chosen->text() : QStringLiteral("none"));
     if (!chosen)
         return;
 
@@ -385,8 +402,14 @@ void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
 
 bool HistoryWindow::createFolder(const QPoint &anchor, qint64 *folderId)
 {
+    const bool wasVisible = isVisible();
     bool ok = false;
-    const QString name = FolderEditPopup::getText(this, tr("新建收藏夹"), QString(), anchor, &ok);
+    const QString name = FolderEditPopup::getText(tr("新建收藏夹"), QString(), anchor, &ok);
+    qCDebug(lcHistoryWindow) << "folder popup closed" << ok << name
+                             << "window visible" << isVisible();
+    // Tool 窗口激活不会自动隐藏 Popup 面板；若仍被隐藏则恢复，避免用户回到空白界面。
+    if (wasVisible && !isVisible())
+        show();
     if (!ok || name.isEmpty())
         return false;
 
@@ -410,7 +433,7 @@ void HistoryWindow::manageFolders()
         QAction *remove = sub->addAction(tr("删除"));
         connect(rename, &QAction::triggered, this, [this, folder] {
             bool ok = false;
-            const QString name = FolderEditPopup::getText(this, tr("重命名收藏夹"), folder.name,
+            const QString name = FolderEditPopup::getText(tr("重命名收藏夹"), folder.name,
                                                           QCursor::pos(), &ok);
             if (!ok || name.isEmpty())
                 return;

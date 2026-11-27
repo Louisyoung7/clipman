@@ -9,10 +9,13 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLoggingCategory>
 #include <QPushButton>
 #include <QScreen>
 #include <QShowEvent>
 #include <QVBoxLayout>
+
+Q_LOGGING_CATEGORY(lcFolderEdit, "clipman.ui.folderedit", QtWarningMsg)
 
 namespace {
 
@@ -23,9 +26,10 @@ constexpr int kGap = 4;
 } // namespace
 
 FolderEditPopup::FolderEditPopup(QWidget *parent)
-    : QWidget(parent, Qt::Dialog | Qt::FramelessWindowHint)
+    : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
 {
-    // 用普通对话框窗口标志，避免 Qt::Popup 抢键盘导致中文输入法候选框无法工作。
+    // Qt::Popup 会 grab 键盘，fcitx 等输入法收不到 Shift 热键，无法切换中文。
+    // Qt::Tool 不 grab 键盘，且不会让宿主历史面板自动隐藏。
     setObjectName(QStringLiteral("folderEditPopup"));
     setMinimumWidth(260);
     setStyleSheet(QStringLiteral(
@@ -86,14 +90,19 @@ bool FolderEditPopup::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_edit && event->type() == QEvent::InputMethod) {
         auto *inputEvent = static_cast<QInputMethodEvent *>(event);
         m_composing = !inputEvent->preeditString().isEmpty();
+        qCDebug(lcFolderEdit) << "input method, preedit" << inputEvent->preeditString()
+                              << "commit" << inputEvent->commitString()
+                              << "composing" << m_composing;
     }
     return QWidget::eventFilter(watched, event);
 }
 
-QString FolderEditPopup::getText(QWidget *parent, const QString &title, const QString &initial,
-                                 const QPoint &anchor, bool *ok)
+QString FolderEditPopup::getText(const QString &title, const QString &initial, const QPoint &anchor,
+                                 bool *ok)
 {
-    FolderEditPopup popup(parent);
+    qCDebug(lcFolderEdit) << "getText enter" << title << "anchor" << anchor;
+    // 不挂到历史面板下：Qt::Popup 在其他窗口激活时会隐藏，子面板会被连带隐藏。
+    FolderEditPopup popup(nullptr);
     popup.m_titleLabel->setText(title);
     popup.m_edit->setText(initial);
 
@@ -101,9 +110,12 @@ QString FolderEditPopup::getText(QWidget *parent, const QString &title, const QS
     QObject::connect(&popup, &FolderEditPopup::finished, &loop, &QEventLoop::quit);
     popup.positionBelow(anchor);
     popup.show();
+    qCDebug(lcFolderEdit) << "shown, focusWidget" << popup.focusWidget()
+                          << "focusWindow" << QGuiApplication::focusWindow();
     if (!popup.m_done)
         loop.exec();
 
+    qCDebug(lcFolderEdit) << "done" << popup.m_result << "text" << popup.m_edit->text();
     if (ok)
         *ok = popup.m_result == kAccepted;
     return popup.m_result == kAccepted ? popup.m_edit->text().trimmed() : QString();
@@ -111,12 +123,14 @@ QString FolderEditPopup::getText(QWidget *parent, const QString &title, const QS
 
 void FolderEditPopup::hideEvent(QHideEvent *event)
 {
+    qCDebug(lcFolderEdit) << "hide, done" << m_done;
     QWidget::hideEvent(event);
     finish(kRejected);
 }
 
 void FolderEditPopup::keyPressEvent(QKeyEvent *event)
 {
+    qCDebug(lcFolderEdit) << "key" << event->key() << "composing" << m_composing;
     // 输入法合成中文时，回车/esc 属于选字，不能提前确认或关闭面板。
     if (m_composing) {
         QWidget::keyPressEvent(event);
@@ -142,10 +156,13 @@ void FolderEditPopup::showEvent(QShowEvent *event)
     QWidget::showEvent(event);
     m_edit->setFocus();
     m_edit->selectAll();
+    qCDebug(lcFolderEdit) << "show, focusWidget" << focusWidget()
+                          << "activeWindow" << isActiveWindow();
 }
 
 void FolderEditPopup::finish(int result)
 {
+    qCDebug(lcFolderEdit) << "finish" << result << "done" << m_done;
     if (m_done)
         return;
     m_done = true;
@@ -168,4 +185,5 @@ void FolderEditPopup::positionBelow(const QPoint &anchor)
         pos.setY(qBound(available.top(), pos.y(), available.bottom() - height() + 1));
     }
     move(pos);
+    qCDebug(lcFolderEdit) << "position" << pos << "size" << size();
 }

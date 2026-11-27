@@ -5,6 +5,7 @@
 #include <QStyledItemDelegate>
 
 class QAbstractItemModel;
+class QAbstractItemView;
 class QEvent;
 class QPainter;
 class QStyleOptionViewItem;
@@ -15,7 +16,7 @@ class FavoriteItemDelegate : public QStyledItemDelegate
     Q_OBJECT
 
 public:
-    explicit FavoriteItemDelegate(QObject *parent = nullptr);
+    explicit FavoriteItemDelegate(QAbstractItemView *view, QObject *parent = nullptr);
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
                const QModelIndex &index) const override;
@@ -26,6 +27,8 @@ signals:
     void starToggled(qint64 entryId);
 
 private:
-    static QRect starRect(const QRect &itemRect);
-    static QRect hitRect(const QRect &itemRect);
+    QAbstractItemView *m_view = nullptr;
+
+    QRect starRect(const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    QRect hitRect(const QStyleOptionViewItem &option, const QModelIndex &index) const;
 };

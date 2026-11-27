@@ -1,21 +1,30 @@
 #include "ui/HistoryWindow.h"
 
+#include <QApplication>
+#include <QButtonGroup>
 #include <QCursor>
 #include <QDateTime>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLoggingCategory>
 #include <QListWidget>
 #include <QMenu>
+#include <QPushButton>
+#include <QScrollBar>
 #include <QScreen>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "core/Store.h"
 #include "ui/FavoriteItemDelegate.h"
+
+Q_LOGGING_CATEGORY(lcHistory, "clipman.ui.history", QtWarningMsg)
 
 namespace {
 constexpr int kCollapsedTextChars = 120;
@@ -30,9 +39,28 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     setWindowFlags(Qt::Popup);
     resize(520, 480);
 
+    const QString tabStyle = QStringLiteral(
+        "QPushButton { padding: 4px 10px; border: 1px solid #d3d8e0; border-radius: 5px; "
+        "background: #f7f8fa; color: #202124; }"
+        "QPushButton:checked { background: #e8f0fe; border-color: #9dc0f7; color: #1a73e8; }");
+
+    m_historyTab = new QPushButton(tr("历史"), this);
+    m_historyTab->setCheckable(true);
+    m_historyTab->setChecked(true);
+    m_historyTab->setStyleSheet(tabStyle);
+
+    m_favoriteTab = new QPushButton(tr("收藏"), this);
+    m_favoriteTab->setCheckable(true);
+    m_favoriteTab->setStyleSheet(tabStyle);
+
     m_search = new QLineEdit(this);
     m_search->setPlaceholderText(tr("搜索剪贴板历史…"));
     m_search->setClearButtonEnabled(true);
+
+    auto *topRow = new QHBoxLayout;
+    topRow->addWidget(m_historyTab);
+    topRow->addWidget(m_favoriteTab);
+    topRow->addWidget(m_search);
 
     m_list = new QListWidget(this);
     m_list->setAlternatingRowColors(false);
@@ -69,7 +97,7 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
         "  color: #1a1a1a;"
         "}"));
 
-    m_starDelegate = new FavoriteItemDelegate(this);
+    m_starDelegate = new FavoriteItemDelegate(m_list, this);
     m_list->setItemDelegate(m_starDelegate);
 
     m_summary = new QLabel(this);
@@ -79,11 +107,26 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     footer->addStretch();
 
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(m_search);
+    layout->addLayout(topRow);
     layout->addWidget(m_list);
     layout->addLayout(footer);
 
-    connect(m_search, &QLineEdit::textChanged, this, &HistoryWindow::refresh);
+    auto *viewGroup = new QButtonGroup(this);
+    viewGroup->setExclusive(true);
+    viewGroup->addButton(m_historyTab, 0);
+    viewGroup->addButton(m_favoriteTab, 1);
+    connect(m_historyTab, &QPushButton::clicked, this, [this] {
+        m_favoritesOnly = false;
+        m_search->clear();
+        refresh();
+    });
+    connect(m_favoriteTab, &QPushButton::clicked, this, [this] {
+        m_favoritesOnly = true;
+        m_search->clear();
+        refresh();
+    });
+
+    connect(m_search, &QLineEdit::textChanged, this, [this] { refresh(false); });
     connect(m_starDelegate, &FavoriteItemDelegate::starToggled, this,
             &HistoryWindow::toggleStar);
 
@@ -173,12 +216,18 @@ QPixmap HistoryWindow::thumbnail(const Entry &entry)
     return pixmap;
 }
 
-void HistoryWindow::refresh()
+void HistoryWindow::refresh(bool preserveSelection)
 {
     const QString query = m_search ? m_search->text() : QString();
     m_favoriteMap = m_store.favoriteMap();
-    m_entries = m_store.search(query);
+    m_entries = m_store.search(query, m_favoritesOnly ? Store::kDefaultFolderId : -1);
     m_expandedId = -1;
+
+    // 收藏切换等局部更新后刷新，保留当前选中项和滚动位置，避免列表跳回顶部。
+    const qint64 selectedId = preserveSelection && m_list && m_list->currentItem()
+                                  ? m_list->currentItem()->data(Qt::UserRole + 1).toLongLong()
+                                  : -1;
+    const int scrollTop = preserveSelection && m_list ? m_list->verticalScrollBar()->value() : 0;
 
     m_list->clear();
     for (const Entry &entry : m_entries) {
@@ -195,8 +244,20 @@ void HistoryWindow::refresh()
         m_list->addItem(item);
     }
 
-    if (m_list->count() > 0)
+    int restoredRow = -1;
+    if (selectedId >= 0) {
+        for (int row = 0; row < m_list->count(); ++row) {
+            if (m_list->item(row)->data(Qt::UserRole + 1).toLongLong() == selectedId) {
+                restoredRow = row;
+                break;
+            }
+        }
+    }
+    if (restoredRow >= 0)
+        m_list->setCurrentRow(restoredRow);
+    else if (m_list->count() > 0)
         m_list->setCurrentRow(0);
+    m_list->verticalScrollBar()->setValue(scrollTop);
 
     m_summary->setText(
         tr("共 %1 条 · 点击星星收藏 · 双击或 Enter 复制 · Delete 删除 · Esc 关闭")
@@ -270,6 +331,14 @@ bool HistoryWindow::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+void HistoryWindow::hideEvent(QHideEvent *event)
+{
+    qCDebug(lcHistory) << "window hide, activePopup" << QApplication::activePopupWidget()
+                       << "activeModal" << QApplication::activeModalWidget()
+                       << "focusWindow" << QGuiApplication::focusWindow();
+    QWidget::hideEvent(event);
+}
+
 void HistoryWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
@@ -281,6 +350,12 @@ void HistoryWindow::keyPressEvent(QKeyEvent *event)
 
 void HistoryWindow::activateCurrent()
 {
+    // 星星点击后紧跟着的双击信号不该触发复制；用时间窗覆盖事件顺序的不确定性。
+    const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_lastStarClickAt;
+    qCDebug(lcHistory) << "activateCurrent, sinceStarClick" << elapsed;
+    if (m_lastStarClickAt > 0 && elapsed >= 0 && elapsed < 600)
+        return;
+
     QListWidgetItem *item = m_list->currentItem();
     if (!item)
         return;
@@ -302,8 +377,15 @@ void HistoryWindow::deleteCurrent()
 
 void HistoryWindow::toggleStar(qint64 entryId)
 {
-    const bool favorite = m_favoriteMap.contains(entryId);
-    m_store.setMembership(entryId, Store::kDefaultFolderId, !favorite);
+    m_lastStarClickAt = QDateTime::currentMSecsSinceEpoch();
+
+    const bool wasFavorite = m_favoriteMap.contains(entryId);
+    qCDebug(lcHistory) << "toggleStar" << entryId << "wasFavorite" << wasFavorite
+                       << "favoritesOnly" << m_favoritesOnly;
+    m_store.setMembership(entryId, Store::kDefaultFolderId, !wasFavorite);
+
+    // 以数据库为准重建列表，保证星星状态与 m_favoriteMap 始终一致；
+    // 定位已改用 visualRect，重建不会再造成点击位置漂移。
     refresh();
 }
 

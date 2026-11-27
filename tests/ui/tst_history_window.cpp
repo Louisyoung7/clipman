@@ -3,6 +3,7 @@
 #include <QAbstractItemModel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -16,7 +17,17 @@ namespace {
 QPoint starPoint(QListWidget *list, int row)
 {
     const QRect rect = list->visualRect(list->model()->index(row, 0));
-    return QPoint(rect.right() - 8, rect.top() + 16);
+    const int right = qMin(rect.right(), list->width() - 1);
+    return QPoint(right - 16, rect.top() + 16);
+}
+
+QPushButton *tabButton(HistoryWindow &window, const QString &text)
+{
+    for (QPushButton *button : window.findChildren<QPushButton *>()) {
+        if (button->text() == text)
+            return button;
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -35,6 +46,8 @@ private slots:
     void returnEmitsEntryActivated();
     void escapeHidesWindow();
     void starClickTogglesFavorite();
+    void rapidStarClicksKeepWindowVisible();
+    void favoriteTabShowsOnlyFavorites();
 
 private:
     void seed(const QStringList &texts);
@@ -149,6 +162,7 @@ void TestHistoryWindow::starClickTogglesFavorite()
     seed({QStringLiteral("alpha")});
 
     HistoryWindow window(*m_store);
+    window.show();
     auto *list = window.findChild<QListWidget *>();
     QVERIFY(list);
     const qint64 id = m_store->recent().first().id;
@@ -158,11 +172,58 @@ void TestHistoryWindow::starClickTogglesFavorite()
     QCOMPARE(activatedSpy.count(), 0);
     QVERIFY(m_store->isFavorite(id));
     QVERIFY(list->item(0)->data(Qt::UserRole + 2).toBool());
+    QVERIFY(window.isVisible());
 
-    QTest::qWait(50);
     QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, starPoint(list, 0));
+    QCOMPARE(activatedSpy.count(), 0);
     QVERIFY(!m_store->isFavorite(id));
     QVERIFY(!list->item(0)->data(Qt::UserRole + 2).toBool());
+    QVERIFY(window.isVisible());
+}
+
+void TestHistoryWindow::rapidStarClicksKeepWindowVisible()
+{
+    seed({QStringLiteral("alpha")});
+
+    HistoryWindow window(*m_store);
+    window.show();
+    auto *list = window.findChild<QListWidget *>();
+    QVERIFY(list);
+    QSignalSpy activatedSpy(&window, &HistoryWindow::entryActivated);
+
+    for (int i = 0; i < 4; ++i) {
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, starPoint(list, 0));
+        QVERIFY(window.isVisible());
+    }
+    QTest::mouseDClick(list->viewport(), Qt::LeftButton, {}, starPoint(list, 0));
+    QVERIFY(window.isVisible());
+    QCOMPARE(activatedSpy.count(), 0);
+}
+
+void TestHistoryWindow::favoriteTabShowsOnlyFavorites()
+{
+    seed({QStringLiteral("alpha"), QStringLiteral("beta")});
+
+    HistoryWindow window(*m_store);
+    auto *list = window.findChild<QListWidget *>();
+    QVERIFY(list);
+    const qint64 alphaId = m_store->recent().last().id;
+    QVERIFY(m_store->setMembership(alphaId, Store::kDefaultFolderId, true));
+
+    auto *historyTab = tabButton(window, QStringLiteral("历史"));
+    auto *favoriteTab = tabButton(window, QStringLiteral("收藏"));
+    QVERIFY(historyTab);
+    QVERIFY(favoriteTab);
+
+    favoriteTab->click();
+    QCOMPARE(list->count(), 1);
+    QVERIFY(list->item(0)->text().contains(QStringLiteral("alpha")));
+
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, starPoint(list, 0));
+    QCOMPARE(list->count(), 0);
+
+    historyTab->click();
+    QCOMPARE(list->count(), 2);
 }
 
 QTEST_MAIN(TestHistoryWindow)

@@ -10,7 +10,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 
 void setError(QString *error, const QString &message)
 {
@@ -54,6 +54,8 @@ bool Store::open(const QString &dbPath, QString *error)
     QSqlQuery pragma(m_db);
     pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+    // 级联删除依赖外键；该开关必须在迁移事务之外生效。
+    pragma.exec(QStringLiteral("PRAGMA foreign_keys=ON"));
 
     return migrate(error);
 }
@@ -131,6 +133,28 @@ bool Store::migrate(QString *error)
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN path TEXT")
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN width INTEGER")
                 << QStringLiteral("ALTER TABLE entries ADD COLUMN height INTEGER");
+        }
+
+        if (version < 4) {
+            sql << QStringLiteral("CREATE TABLE IF NOT EXISTS folders ("
+                                  "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                  "  name TEXT NOT NULL UNIQUE,"
+                                  "  is_default INTEGER NOT NULL DEFAULT 0,"
+                                  "  created_at INTEGER NOT NULL"
+                                  ")")
+                << QStringLiteral("CREATE TABLE IF NOT EXISTS entry_folders ("
+                                  "  entry_id INTEGER NOT NULL,"
+                                  "  folder_id INTEGER NOT NULL,"
+                                  "  created_at INTEGER NOT NULL,"
+                                  "  PRIMARY KEY (entry_id, folder_id),"
+                                  "  FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,"
+                                  "  FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE"
+                                  ")")
+                << QStringLiteral("CREATE INDEX IF NOT EXISTS idx_entry_folders_folder "
+                                  "ON entry_folders(folder_id, created_at DESC)")
+                << QStringLiteral("INSERT OR IGNORE INTO folders(id, name, is_default, created_at) "
+                                  "VALUES(1, '收藏', 1, %1)")
+                       .arg(QDateTime::currentMSecsSinceEpoch());
         }
 
         sql << QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion);
@@ -269,14 +293,21 @@ bool Store::entry(qint64 id, Entry *out) const
     return true;
 }
 
-QVector<Entry> Store::recent(int limit) const
+QVector<Entry> Store::recent(int limit, qint64 folderId) const
 {
     QVector<Entry> entries;
 
+    QString sql = QStringLiteral("SELECT e.id, e.hash, e.kind, e.mime, e.text_content, e.path, "
+                                 "e.width, e.height, e.created_at FROM entries e");
+    if (folderId >= 0)
+        sql += QStringLiteral(" JOIN entry_folders ef ON ef.entry_id = e.id "
+                              "WHERE ef.folder_id = ?");
+    sql += QStringLiteral(" ORDER BY e.created_at DESC LIMIT ?");
+
     QSqlQuery query(m_db);
-    query.prepare(
-        QStringLiteral("SELECT id, hash, kind, mime, text_content, path, width, height, created_at "
-                       "FROM entries ORDER BY created_at DESC LIMIT ?"));
+    query.prepare(sql);
+    if (folderId >= 0)
+        query.addBindValue(folderId);
     query.addBindValue(limit);
     if (!query.exec())
         return entries;
@@ -297,11 +328,11 @@ QVector<Entry> Store::recent(int limit) const
     return entries;
 }
 
-QVector<Entry> Store::search(const QString &query, int limit) const
+QVector<Entry> Store::search(const QString &query, qint64 folderId, int limit) const
 {
     const QString trimmed = query.trimmed();
     if (trimmed.isEmpty())
-        return recent(limit);
+        return recent(limit, folderId);
 
     QStringList parts;
     const QStringList tokens = trimmed.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
@@ -322,22 +353,30 @@ QVector<Entry> Store::search(const QString &query, int limit) const
     }
 
     if (parts.isEmpty())
-        return recent(limit);
+        return recent(limit, folderId);
 
     QVector<Entry> entries;
 
-    QSqlQuery ftsQuery(m_db);
-    ftsQuery.prepare(QStringLiteral(
+    QString sql = QStringLiteral(
         "SELECT e.id, e.hash, e.kind, e.mime, e.text_content, e.path, e.width, e.height, "
         "e.created_at "
-        "FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid "
-        "WHERE entries_fts MATCH ? "
-        "ORDER BY rank LIMIT ?"));
+        "FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid ");
+    if (folderId >= 0)
+        sql += QStringLiteral("JOIN entry_folders ef ON ef.entry_id = e.id ");
+    sql += QStringLiteral("WHERE entries_fts MATCH ? ");
+    if (folderId >= 0)
+        sql += QStringLiteral("AND ef.folder_id = ? ");
+    sql += QStringLiteral("ORDER BY rank LIMIT ?");
+
+    QSqlQuery ftsQuery(m_db);
+    ftsQuery.prepare(sql);
     ftsQuery.addBindValue(parts.join(QLatin1Char(' ')));
+    if (folderId >= 0)
+        ftsQuery.addBindValue(folderId);
     ftsQuery.addBindValue(limit);
     if (!ftsQuery.exec()) {
         qWarning() << "FTS 查询失败，回退到最近记录:" << ftsQuery.lastError().text();
-        return recent(limit);
+        return recent(limit, folderId);
     }
 
     while (ftsQuery.next()) {
@@ -407,4 +446,129 @@ int Store::count() const
     if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM entries")) || !query.next())
         return 0;
     return query.value(0).toInt();
+}
+
+QVector<Folder> Store::folders() const
+{
+    QVector<Folder> result;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT id, name, is_default, created_at FROM folders "
+                                   "ORDER BY is_default DESC, created_at ASC")))
+        return result;
+
+    while (query.next()) {
+        Folder folder;
+        folder.id = query.value(0).toLongLong();
+        folder.name = query.value(1).toString();
+        folder.isDefault = query.value(2).toBool();
+        folder.createdAt = query.value(3).toLongLong();
+        result.append(folder);
+    }
+    return result;
+}
+
+bool Store::addFolder(const QString &name, qint64 *id, QString *error)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        setError(error, QStringLiteral("收藏夹名称不能为空"));
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(
+        QStringLiteral("INSERT INTO folders(name, is_default, created_at) VALUES(?, 0, ?)"));
+    query.addBindValue(trimmed);
+    query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    if (id)
+        *id = query.lastInsertId().toLongLong();
+    return true;
+}
+
+bool Store::renameFolder(qint64 id, const QString &name, QString *error)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        setError(error, QStringLiteral("收藏夹名称不能为空"));
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("UPDATE folders SET name = ? WHERE id = ?"));
+    query.addBindValue(trimmed);
+    query.addBindValue(id);
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    return true;
+}
+
+bool Store::removeFolder(qint64 id, QString *error)
+{
+    QSqlQuery lookup(m_db);
+    lookup.prepare(QStringLiteral("SELECT is_default FROM folders WHERE id = ?"));
+    lookup.addBindValue(id);
+    if (!lookup.exec()) {
+        setError(error, lookup.lastError().text());
+        return false;
+    }
+    if (lookup.next() && lookup.value(0).toBool()) {
+        setError(error, QStringLiteral("默认收藏夹不能删除"));
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM folders WHERE id = ?"));
+    query.addBindValue(id);
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    return true;
+}
+
+bool Store::setMembership(qint64 entryId, qint64 folderId, bool member, QString *error)
+{
+    QSqlQuery query(m_db);
+    if (member) {
+        query.prepare(QStringLiteral("INSERT OR IGNORE INTO entry_folders"
+                                     "(entry_id, folder_id, created_at) VALUES(?, ?, ?)"));
+        query.addBindValue(entryId);
+        query.addBindValue(folderId);
+        query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    } else {
+        query.prepare(QStringLiteral("DELETE FROM entry_folders WHERE entry_id = ? AND folder_id = ?"));
+        query.addBindValue(entryId);
+        query.addBindValue(folderId);
+    }
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    return true;
+}
+
+bool Store::isFavorite(qint64 entryId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT 1 FROM entry_folders WHERE entry_id = ? LIMIT 1"));
+    query.addBindValue(entryId);
+    return query.exec() && query.next();
+}
+
+QHash<qint64, QVector<qint64>> Store::favoriteMap() const
+{
+    QHash<qint64, QVector<qint64>> result;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT entry_id, folder_id FROM entry_folders")))
+        return result;
+
+    while (query.next())
+        result[query.value(0).toLongLong()].append(query.value(1).toLongLong());
+    return result;
 }

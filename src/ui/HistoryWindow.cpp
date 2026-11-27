@@ -1,20 +1,26 @@
 #include "ui/HistoryWindow.h"
 
+#include <QComboBox>
 #include <QCursor>
 #include <QDateTime>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMessageBox>
 #include <QScreen>
+#include <QSignalBlocker>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "core/Store.h"
+#include "ui/FavoriteItemDelegate.h"
 
 namespace {
 constexpr int kCollapsedTextChars = 120;
@@ -32,6 +38,19 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     m_search = new QLineEdit(this);
     m_search->setPlaceholderText(tr("搜索剪贴板历史…"));
     m_search->setClearButtonEnabled(true);
+
+    auto *topRow = new QHBoxLayout;
+    topRow->addWidget(m_search);
+
+    m_folderCombo = new QComboBox(this);
+    m_folderCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    m_folderCombo->setToolTip(tr("筛选收藏夹"));
+    topRow->addWidget(m_folderCombo);
+
+    m_manageButton = new QToolButton(this);
+    m_manageButton->setText(QStringLiteral("⋯"));
+    m_manageButton->setToolTip(tr("管理收藏夹"));
+    topRow->addWidget(m_manageButton);
 
     m_list = new QListWidget(this);
     m_list->setAlternatingRowColors(false);
@@ -68,6 +87,9 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
         "  color: #1a1a1a;"
         "}"));
 
+    m_starDelegate = new FavoriteItemDelegate(this);
+    m_list->setItemDelegate(m_starDelegate);
+
     m_summary = new QLabel(this);
 
     auto *footer = new QHBoxLayout;
@@ -75,11 +97,21 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     footer->addStretch();
 
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(m_search);
+    layout->addLayout(topRow);
     layout->addWidget(m_list);
     layout->addLayout(footer);
 
     connect(m_search, &QLineEdit::textChanged, this, &HistoryWindow::refresh);
+    connect(m_folderCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int index) {
+                m_currentFolderId = m_folderCombo->itemData(index).toLongLong();
+                refresh();
+            });
+    connect(m_manageButton, &QToolButton::clicked, this, &HistoryWindow::manageFolders);
+    connect(m_starDelegate, &FavoriteItemDelegate::starToggled, this,
+            &HistoryWindow::toggleStar);
+    connect(m_starDelegate, &FavoriteItemDelegate::starLongPressed, this,
+            &HistoryWindow::showStarMenu);
 
     connect(m_list, &QListWidget::itemClicked, this, &HistoryWindow::toggleTextExpansion);
     connect(m_list, &QListWidget::itemDoubleClicked, this, &HistoryWindow::activateCurrent);
@@ -169,14 +201,17 @@ QPixmap HistoryWindow::thumbnail(const Entry &entry)
 
 void HistoryWindow::refresh()
 {
+    reloadFolders();
     const QString query = m_search ? m_search->text() : QString();
-    m_entries = m_store.search(query);
+    m_favoriteMap = m_store.favoriteMap();
+    m_entries = m_store.search(query, m_currentFolderId);
     m_expandedId = -1;
 
     m_list->clear();
     for (const Entry &entry : m_entries) {
         auto *item = new QListWidgetItem(entryLabel(entry, false));
         item->setData(Qt::UserRole + 1, entry.id);
+        item->setData(Qt::UserRole + 2, m_favoriteMap.contains(entry.id));
 
         if (entry.kind == ClipKind::Image) {
             const QPixmap pixmap = thumbnail(entry);
@@ -191,7 +226,7 @@ void HistoryWindow::refresh()
         m_list->setCurrentRow(0);
 
     m_summary->setText(
-        tr("共 %1 条 · 单击选中/展开长文本 · 双击或 Enter 复制 · Delete 删除 · Esc 关闭")
+        tr("共 %1 条 · 星星短按收藏 / 长按选收藏夹 · 双击或 Enter 复制 · Delete 删除 · Esc 关闭")
             .arg(m_entries.size()));
 }
 
@@ -290,4 +325,124 @@ void HistoryWindow::deleteCurrent()
     const qint64 id = item->data(Qt::UserRole + 1).toLongLong();
     m_store.removeEntry(id);
     refresh();
+}
+
+void HistoryWindow::reloadFolders()
+{
+    const QSignalBlocker blocker(m_folderCombo);
+    m_folderCombo->clear();
+    m_folderCombo->addItem(tr("全部历史"), -1);
+    for (const Folder &folder : m_store.folders())
+        m_folderCombo->addItem(folder.name, folder.id);
+
+    const int index = m_folderCombo->findData(m_currentFolderId);
+    if (index < 0)
+        m_currentFolderId = -1;
+    m_folderCombo->setCurrentIndex(index >= 0 ? index : 0);
+}
+
+void HistoryWindow::toggleStar(qint64 entryId)
+{
+    // 已收藏（任意收藏夹）→ 全部取消；未收藏 → 加入默认收藏夹。
+    if (m_favoriteMap.contains(entryId)) {
+        for (qint64 folderId : m_favoriteMap.value(entryId))
+            m_store.setMembership(entryId, folderId, false);
+    } else {
+        m_store.setMembership(entryId, Store::kDefaultFolderId, true);
+    }
+    refresh();
+}
+
+void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
+{
+    QMenu menu(this);
+    const QVector<qint64> current = m_favoriteMap.value(entryId);
+    for (const Folder &folder : m_store.folders()) {
+        QAction *action = menu.addAction(folder.name);
+        action->setCheckable(true);
+        action->setChecked(current.contains(folder.id));
+        action->setData(folder.id);
+    }
+    menu.addSeparator();
+    QAction *addAction = menu.addAction(tr("新建收藏夹…"));
+    QAction *manageAction = menu.addAction(tr("管理收藏夹…"));
+
+    QAction *chosen = menu.exec(globalPos);
+    if (!chosen)
+        return;
+
+    if (chosen == addAction) {
+        qint64 folderId = 0;
+        if (createFolder(&folderId))
+            m_store.setMembership(entryId, folderId, true);
+    } else if (chosen == manageAction) {
+        manageFolders();
+    } else {
+        m_store.setMembership(entryId, chosen->data().toLongLong(), !chosen->isChecked());
+    }
+    refresh();
+}
+
+bool HistoryWindow::createFolder(qint64 *folderId)
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("新建收藏夹"), tr("名称:"),
+                                               QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return false;
+
+    QString error;
+    if (!m_store.addFolder(name, folderId, &error)) {
+        QMessageBox::warning(this, tr("新建收藏夹失败"), error);
+        return false;
+    }
+    return true;
+}
+
+void HistoryWindow::manageFolders()
+{
+    QMenu menu(this);
+    for (const Folder &folder : m_store.folders()) {
+        if (folder.isDefault)
+            continue;
+
+        QMenu *sub = menu.addMenu(folder.name);
+        QAction *rename = sub->addAction(tr("重命名…"));
+        QAction *remove = sub->addAction(tr("删除"));
+        connect(rename, &QAction::triggered, this, [this, folder] {
+            bool ok = false;
+            const QString name = QInputDialog::getText(this, tr("重命名收藏夹"), tr("名称:"),
+                                                       QLineEdit::Normal, folder.name, &ok);
+            if (!ok || name.trimmed().isEmpty())
+                return;
+            QString error;
+            if (!m_store.renameFolder(folder.id, name, &error))
+                QMessageBox::warning(this, tr("重命名失败"), error);
+            refresh();
+        });
+        connect(remove, &QAction::triggered, this, [this, folder] {
+            if (QMessageBox::question(this, tr("删除收藏夹"),
+                                      tr("确定删除「%1」？其中的历史项不会被删除。")
+                                          .arg(folder.name),
+                                      QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+                return;
+            QString error;
+            if (!m_store.removeFolder(folder.id, &error))
+                QMessageBox::warning(this, tr("删除收藏夹失败"), error);
+            if (m_currentFolderId == folder.id) {
+                m_currentFolderId = -1;
+                m_folderCombo->setCurrentIndex(0);
+            }
+            refresh();
+        });
+    }
+    if (menu.actions().isEmpty())
+        menu.addAction(tr("暂无自定义收藏夹"))->setEnabled(false);
+    menu.addSeparator();
+    QAction *addAction = menu.addAction(tr("新建收藏夹…"));
+    connect(addAction, &QAction::triggered, this, [this] {
+        if (createFolder())
+            refresh();
+    });
+    menu.exec(QCursor::pos());
 }

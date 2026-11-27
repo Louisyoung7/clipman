@@ -83,9 +83,19 @@ void createV1Database(const QString &dbPath)
     QSqlDatabase::removeDatabase(QStringLiteral("v1_setup"));
 }
 
+qint64 entryIdOf(const Store &store, const QString &hash)
+{
+    const QVector<Entry> entries = store.recent();
+    for (const Entry &entry : entries) {
+        if (entry.hash == hash)
+            return entry.id;
+    }
+    return -1;
+}
+
 } // namespace
 
-TEST_CASE("Store::open 建立 v3 schema", "[store]")
+TEST_CASE("Store::open 建立 v4 schema", "[store]")
 {
     QTemporaryDir temp;
     REQUIRE(temp.isValid());
@@ -94,11 +104,17 @@ TEST_CASE("Store::open 建立 v3 schema", "[store]")
     Store store;
     QString error;
     REQUIRE(store.open(dbPath, &error));
-    REQUIRE(userVersion(dbPath) == 3);
+    REQUIRE(userVersion(dbPath) == 4);
     REQUIRE(store.count() == 0);
+
+    const QVector<Folder> folders = store.folders();
+    REQUIRE(folders.size() == 1);
+    REQUIRE(folders.first().id == Store::kDefaultFolderId);
+    REQUIRE(folders.first().name == QStringLiteral("收藏"));
+    REQUIRE(folders.first().isDefault);
 }
 
-TEST_CASE("Store::open 把 v1 库迁移到 v3", "[store]")
+TEST_CASE("Store::open 把 v1 库迁移到 v4", "[store]")
 {
     QTemporaryDir temp;
     REQUIRE(temp.isValid());
@@ -109,13 +125,16 @@ TEST_CASE("Store::open 把 v1 库迁移到 v3", "[store]")
     Store store;
     QString error;
     REQUIRE(store.open(dbPath, &error));
-    REQUIRE(userVersion(dbPath) == 3);
+    REQUIRE(userVersion(dbPath) == 4);
     REQUIRE(store.count() == 1);
 
     const QVector<Entry> entries = store.recent();
     REQUIRE(entries.size() == 1);
     REQUIRE(entries.first().text == QStringLiteral("legacy text"));
     REQUIRE(entries.first().kind == ClipKind::Text);
+
+    REQUIRE(store.folders().size() == 1);
+    REQUIRE(store.favoriteMap().isEmpty());
 }
 
 TEST_CASE("Store::addItem 按 hash 去重并刷新时间", "[store]")
@@ -133,6 +152,12 @@ TEST_CASE("Store::addItem 按 hash 去重并刷新时间", "[store]")
     Entry entry;
     REQUIRE(store.entry(store.recent().first().id, &entry));
     REQUIRE(entry.createdAt == 2000);
+
+    const qint64 id = entry.id;
+    REQUIRE(store.setMembership(id, Store::kDefaultFolderId, true));
+    REQUIRE(store.addItem(textItem(QStringLiteral("h1"), QStringLiteral("hello"), 3000)));
+    REQUIRE(entryIdOf(store, QStringLiteral("h1")) == id);
+    REQUIRE(store.isFavorite(id));
 }
 
 TEST_CASE("Store::touchEntry 把复用项刷新为最新", "[store]")
@@ -299,4 +324,100 @@ TEST_CASE("Store::setMaxEntries 夹取到允许范围", "[store]")
 
     store.setMaxEntries(999999);
     REQUIRE(store.maxEntries() == Store::kMaxRetention);
+}
+
+TEST_CASE("Store 自定义收藏夹可创建、重命名与删除", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+
+    qint64 id = 0;
+    REQUIRE(store.addFolder(QStringLiteral("  工作  "), &id));
+    REQUIRE(id > 0);
+    REQUIRE(store.folders().size() == 2);
+    REQUIRE(store.folders().last().name == QStringLiteral("工作"));
+
+    REQUIRE(store.renameFolder(id, QStringLiteral("常用")));
+    REQUIRE(store.folders().last().name == QStringLiteral("常用"));
+
+    REQUIRE_FALSE(store.addFolder(QStringLiteral("   ")));
+    REQUIRE_FALSE(store.removeFolder(Store::kDefaultFolderId));
+    REQUIRE(store.removeFolder(id));
+    REQUIRE(store.folders().size() == 1);
+}
+
+TEST_CASE("Store 收藏关系与按收藏夹检索", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+    REQUIRE(store.addItem(textItem(QStringLiteral("h1"), QStringLiteral("alpha text"), 1000)));
+    REQUIRE(store.addItem(textItem(QStringLiteral("h2"), QStringLiteral("beta text"), 2000)));
+
+    const qint64 alphaId = entryIdOf(store, QStringLiteral("h1"));
+    const qint64 betaId = entryIdOf(store, QStringLiteral("h2"));
+    REQUIRE(alphaId > 0);
+    REQUIRE(betaId > 0);
+
+    qint64 workId = 0;
+    REQUIRE(store.addFolder(QStringLiteral("工作"), &workId));
+
+    REQUIRE_FALSE(store.isFavorite(alphaId));
+    REQUIRE(store.setMembership(alphaId, Store::kDefaultFolderId, true));
+    REQUIRE(store.setMembership(alphaId, workId, true));
+    REQUIRE(store.isFavorite(alphaId));
+
+    const QHash<qint64, QVector<qint64>> before = store.favoriteMap();
+    REQUIRE(before.value(alphaId).size() == 2);
+    REQUIRE_FALSE(before.contains(betaId));
+
+    REQUIRE(store.recent(200, Store::kDefaultFolderId).size() == 1);
+    REQUIRE(store.recent(200, workId).first().id == alphaId);
+    REQUIRE(store.search(QStringLiteral("alpha"), workId).size() == 1);
+    REQUIRE(store.search(QStringLiteral("beta"), workId).isEmpty());
+    REQUIRE(store.search(QString()).size() == 2);
+    REQUIRE(store.search(QString(), workId).size() == 1);
+
+    REQUIRE(store.setMembership(alphaId, workId, false));
+    const QHash<qint64, QVector<qint64>> after = store.favoriteMap();
+    REQUIRE(after.value(alphaId).size() == 1);
+    REQUIRE(store.recent(200, workId).isEmpty());
+    REQUIRE(store.isFavorite(alphaId));
+}
+
+TEST_CASE("Store 删除历史或收藏夹时级联清理收藏关系", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+    REQUIRE(store.addItem(textItem(QStringLiteral("h1"), QStringLiteral("alpha"), 1000)));
+    REQUIRE(store.addItem(textItem(QStringLiteral("h2"), QStringLiteral("beta"), 2000)));
+
+    const qint64 alphaId = entryIdOf(store, QStringLiteral("h1"));
+    const qint64 betaId = entryIdOf(store, QStringLiteral("h2"));
+    REQUIRE(alphaId > 0);
+    REQUIRE(betaId > 0);
+
+    qint64 workId = 0;
+    REQUIRE(store.addFolder(QStringLiteral("工作"), &workId));
+    REQUIRE(store.setMembership(alphaId, Store::kDefaultFolderId, true));
+    REQUIRE(store.setMembership(alphaId, workId, true));
+    REQUIRE(store.setMembership(betaId, Store::kDefaultFolderId, true));
+
+    REQUIRE(store.removeFolder(workId));
+    REQUIRE(store.favoriteMap().value(alphaId).size() == 1);
+
+    REQUIRE(store.removeEntry(alphaId));
+    REQUIRE_FALSE(store.favoriteMap().contains(alphaId));
+    REQUIRE(store.favoriteMap().value(betaId).size() == 1);
+
+    REQUIRE(store.clearAll());
+    REQUIRE(store.favoriteMap().isEmpty());
 }

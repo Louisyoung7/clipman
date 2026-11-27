@@ -7,7 +7,6 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
-#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,6 +20,7 @@
 
 #include "core/Store.h"
 #include "ui/FavoriteItemDelegate.h"
+#include "ui/FolderEditPopup.h"
 
 namespace {
 constexpr int kCollapsedTextChars = 120;
@@ -373,7 +373,7 @@ void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
 
     if (chosen == addAction) {
         qint64 folderId = 0;
-        if (createFolder(&folderId))
+        if (createFolder(QCursor::pos(), &folderId))
             m_store.setMembership(entryId, folderId, true);
     } else if (chosen == manageAction) {
         manageFolders();
@@ -383,12 +383,11 @@ void HistoryWindow::showStarMenu(qint64 entryId, const QPoint &globalPos)
     refresh();
 }
 
-bool HistoryWindow::createFolder(qint64 *folderId)
+bool HistoryWindow::createFolder(const QPoint &anchor, qint64 *folderId)
 {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("新建收藏夹"), tr("名称:"),
-                                               QLineEdit::Normal, QString(), &ok);
-    if (!ok || name.trimmed().isEmpty())
+    const QString name = FolderEditPopup::getText(this, tr("新建收藏夹"), QString(), anchor, &ok);
+    if (!ok || name.isEmpty())
         return false;
 
     QString error;
@@ -411,9 +410,9 @@ void HistoryWindow::manageFolders()
         QAction *remove = sub->addAction(tr("删除"));
         connect(rename, &QAction::triggered, this, [this, folder] {
             bool ok = false;
-            const QString name = QInputDialog::getText(this, tr("重命名收藏夹"), tr("名称:"),
-                                                       QLineEdit::Normal, folder.name, &ok);
-            if (!ok || name.trimmed().isEmpty())
+            const QString name = FolderEditPopup::getText(this, tr("重命名收藏夹"), folder.name,
+                                                          QCursor::pos(), &ok);
+            if (!ok || name.isEmpty())
                 return;
             QString error;
             if (!m_store.renameFolder(folder.id, name, &error))
@@ -441,7 +440,7 @@ void HistoryWindow::manageFolders()
     menu.addSeparator();
     QAction *addAction = menu.addAction(tr("新建收藏夹…"));
     connect(addAction, &QAction::triggered, this, [this] {
-        if (createFolder())
+        if (createFolder(QCursor::pos()))
             refresh();
     });
     menu.exec(QCursor::pos());

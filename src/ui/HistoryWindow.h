@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QPixmap>
+#include <QPoint>
 #include <QVector>
 #include <QWidget>
 
@@ -47,7 +48,7 @@ private:
     void toggleStar(qint64 entryId);
     void showStarMenu(qint64 entryId, const QPoint &globalPos);
     void manageFolders();
-    bool createFolder(qint64 *folderId = nullptr);
+    bool createFolder(const QPoint &anchor, qint64 *folderId = nullptr);
 
     Store &m_store;
     QLineEdit *m_search = nullptr;

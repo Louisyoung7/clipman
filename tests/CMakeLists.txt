@@ -14,7 +14,8 @@ endforeach()
 
 # 被测的 UI / 桌面集成源文件直接编进对应测试目标，产品结构不变。
 target_sources(tst_history_window PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/HistoryWindow.cpp
-                                        ${CMAKE_SOURCE_DIR}/src/ui/FavoriteItemDelegate.cpp)
+                                        ${CMAKE_SOURCE_DIR}/src/ui/FavoriteItemDelegate.cpp
+                                        ${CMAKE_SOURCE_DIR}/src/ui/FolderEditPopup.cpp)
 target_link_libraries(tst_history_window PRIVATE clipman_core Qt6::Widgets Qt6::Test)
 
 target_sources(tst_autostart PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/Autostart.cpp)

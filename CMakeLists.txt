@@ -56,6 +56,8 @@ qt_add_executable(clipman
     src/platform/XcbClipboardWatcher.cpp
     src/ui/FavoriteItemDelegate.h
     src/ui/FavoriteItemDelegate.cpp
+    src/ui/FolderEditPopup.h
+    src/ui/FolderEditPopup.cpp
     src/ui/HistoryWindow.h
     src/ui/HistoryWindow.cpp
     src/ui/SettingsDialog.h

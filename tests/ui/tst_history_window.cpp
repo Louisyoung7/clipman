@@ -3,10 +3,11 @@
 #include <QAbstractItemModel>
 #include <QApplication>
 #include <QComboBox>
-#include <QInputDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -15,6 +16,7 @@
 
 #include "core/Store.h"
 #include "ui/FavoriteItemDelegate.h"
+#include "ui/FolderEditPopup.h"
 #include "ui/HistoryWindow.h"
 
 namespace {
@@ -235,13 +237,23 @@ void TestHistoryWindow::starLongPressMenuCreatesFolder()
             return true;
         });
     });
-    QTimer::singleShot(650, this, [] {
-        pollUntil([] {
-            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
-            if (!dialog)
+    bool titleOk = false;
+    QTimer::singleShot(650, this, [&titleOk] {
+        pollUntil([&titleOk] {
+            auto *popup = qobject_cast<FolderEditPopup *>(QApplication::activePopupWidget());
+            if (!popup)
                 return false;
-            dialog->setTextValue(QStringLiteral("临时收藏"));
-            QTimer::singleShot(0, [dialog] { dialog->accept(); });
+            auto *label = popup->findChild<QLabel *>(QStringLiteral("folderTitle"));
+            titleOk = label && label->text() == QStringLiteral("新建收藏夹");
+            auto *edit = popup->findChild<QLineEdit *>();
+            if (!edit)
+                return false;
+            edit->setText(QStringLiteral("临时收藏"));
+            QTimer::singleShot(0, [popup] {
+                auto *ok = popup->findChild<QPushButton *>(QStringLiteral("folderOk"));
+                if (ok)
+                    ok->click();
+            });
             return true;
         });
     });
@@ -257,6 +269,7 @@ void TestHistoryWindow::starLongPressMenuCreatesFolder()
     QTest::qWait(600);
     QTest::mouseRelease(list->viewport(), Qt::LeftButton, {}, star);
 
+    QVERIFY(titleOk);
     QCOMPARE(m_store->folders().size(), 2);
     QVERIFY(m_store->isFavorite(id));
     const QVector<Folder> folders = m_store->folders();

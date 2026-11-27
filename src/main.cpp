@@ -157,6 +157,10 @@ int main(int argc, char *argv[])
             QGuiApplication::clipboard()->setText(entry.text);
             break;
         }
+
+        // 历史项被重新使用（回填剪贴板）后按最新时间参与排序与裁剪。
+        if (!store.touchEntry(id, &error))
+            qWarning() << "刷新历史时间失败:" << error;
     });
 
     QObject::connect(&tray, &TrayController::pauseToggled, &window,

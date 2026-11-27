@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QSqlDatabase>
@@ -132,6 +133,32 @@ TEST_CASE("Store::addItem 按 hash 去重并刷新时间", "[store]")
     Entry entry;
     REQUIRE(store.entry(store.recent().first().id, &entry));
     REQUIRE(entry.createdAt == 2000);
+}
+
+TEST_CASE("Store::touchEntry 把复用项刷新为最新", "[store]")
+{
+    QTemporaryDir temp;
+    REQUIRE(temp.isValid());
+
+    Store store;
+    REQUIRE(store.open(temp.path() + QStringLiteral("/history.db")));
+
+    REQUIRE(store.addItem(textItem(QStringLiteral("old"), QStringLiteral("old text"), 1000)));
+    REQUIRE(store.addItem(textItem(QStringLiteral("new"), QStringLiteral("new text"), 2000)));
+
+    const QVector<Entry> before = store.recent();
+    REQUIRE(before.size() == 2);
+    const qint64 oldId = before.last().id;
+
+    const qint64 startedAt = QDateTime::currentMSecsSinceEpoch();
+    REQUIRE(store.touchEntry(oldId));
+    const qint64 endedAt = QDateTime::currentMSecsSinceEpoch();
+
+    Entry entry;
+    REQUIRE(store.entry(oldId, &entry));
+    REQUIRE(entry.createdAt >= startedAt);
+    REQUIRE(entry.createdAt <= endedAt);
+    REQUIRE(store.recent().first().id == oldId);
 }
 
 TEST_CASE("Store::search 使用 FTS5 前缀查询", "[store]")

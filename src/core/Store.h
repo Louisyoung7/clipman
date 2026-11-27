@@ -23,6 +23,7 @@ public:
 
     bool open(const QString &dbPath, QString *error = nullptr);
     bool addItem(const PreparedItem &item, QString *error = nullptr);
+    bool touchEntry(qint64 id, QString *error = nullptr);
     bool removeEntry(qint64 id, QString *error = nullptr);
     bool clearAll(QString *error = nullptr);
 

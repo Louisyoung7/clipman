@@ -185,6 +185,19 @@ bool Store::addItem(const PreparedItem &item, QString *error)
     return true;
 }
 
+bool Store::touchEntry(qint64 id, QString *error)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("UPDATE entries SET created_at = ? WHERE id = ?"));
+    query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    query.addBindValue(id);
+    if (!query.exec()) {
+        setError(error, query.lastError().text());
+        return false;
+    }
+    return true;
+}
+
 void Store::setMaxEntries(int entries)
 {
     m_maxEntries = qBound(kMinRetention, entries, kMaxRetention);

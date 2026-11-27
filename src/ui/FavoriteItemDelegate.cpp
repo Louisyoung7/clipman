@@ -1,7 +1,6 @@
 #include "ui/FavoriteItemDelegate.h"
 
 #include <QAbstractItemModel>
-#include <QCursor>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -15,7 +14,6 @@ constexpr qreal kPi = 3.14159265358979323846;
 constexpr int kStarSize = 16;
 constexpr int kStarMargin = 8;
 constexpr int kHitPadding = 6;
-constexpr int kLongPressMs = 500;
 
 QPainterPath starPath(const QRectF &rect)
 {
@@ -53,14 +51,6 @@ QColor starBackground(const QStyleOptionViewItem &option)
 FavoriteItemDelegate::FavoriteItemDelegate(QObject *parent)
     : QStyledItemDelegate(parent)
 {
-    m_longPressTimer.setSingleShot(true);
-    m_longPressTimer.setInterval(kLongPressMs);
-    connect(&m_longPressTimer, &QTimer::timeout, this, [this] {
-        if (m_pendingEntryId < 0)
-            return;
-        m_longFired = true;
-        emit starLongPressed(m_pendingEntryId, QCursor::pos());
-    });
 }
 
 QRect FavoriteItemDelegate::starRect(const QRect &itemRect)
@@ -108,43 +98,18 @@ bool FavoriteItemDelegate::editorEvent(QEvent *event, QAbstractItemModel *model,
                                        const QModelIndex &index)
 {
     const QRect hit = hitRect(option.rect);
-
     switch (event->type()) {
-    case QEvent::MouseButtonPress: {
-        auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (mouseEvent->button() != Qt::LeftButton || !hit.contains(mouseEvent->position().toPoint()))
-            return QStyledItemDelegate::editorEvent(event, model, option, index);
-        m_pendingEntryId = index.data(Qt::UserRole + 1).toLongLong();
-        m_longFired = false;
-        m_longPressTimer.start();
-        return true;
-    }
-    case QEvent::MouseButtonRelease: {
-        auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (m_pendingEntryId < 0)
-            return QStyledItemDelegate::editorEvent(event, model, option, index);
-        if (mouseEvent->button() == Qt::LeftButton && !m_longFired &&
-            hit.contains(mouseEvent->position().toPoint()))
-            emit starToggled(m_pendingEntryId);
-        cancelPending();
-        return true;
-    }
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
     case QEvent::MouseButtonDblClick: {
         auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (hit.contains(mouseEvent->position().toPoint())) {
-            cancelPending();
-            return true;
-        }
-        return QStyledItemDelegate::editorEvent(event, model, option, index);
+        if (!hit.contains(mouseEvent->position().toPoint()))
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        if (event->type() == QEvent::MouseButtonRelease)
+            emit starToggled(index.data(Qt::UserRole + 1).toLongLong());
+        return true;
     }
     default:
         return QStyledItemDelegate::editorEvent(event, model, option, index);
     }
-}
-
-void FavoriteItemDelegate::cancelPending()
-{
-    m_longPressTimer.stop();
-    m_pendingEntryId = -1;
-    m_longFired = false;
 }

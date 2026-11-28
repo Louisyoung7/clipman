@@ -10,7 +10,7 @@
 
 #include <cmath>
 
-Q_LOGGING_CATEGORY(lcStar, "clipman.ui.star", QtWarningMsg)
+Q_LOGGING_CATEGORY(lcStar, "clipory.ui.star", QtWarningMsg)
 
 namespace {
 

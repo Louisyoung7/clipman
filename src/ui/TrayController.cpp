@@ -41,7 +41,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
 {
     m_tray = new QSystemTrayIcon(this);
 
-    QIcon icon = QIcon::fromTheme(QStringLiteral("clipman"));
+    QIcon icon = QIcon::fromTheme(QStringLiteral("clipory"));
     if (icon.isNull())
         icon = QIcon::fromTheme(QStringLiteral("edit-paste"));
     if (icon.isNull())
@@ -50,7 +50,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
         icon = fallbackIcon();
 
     m_tray->setIcon(icon);
-    m_tray->setToolTip(tr("Clipman 剪贴板历史"));
+    m_tray->setToolTip(tr("Clipory 剪贴板历史"));
 
     m_menu = new QMenu;
     QAction *showAction = m_menu->addAction(tr("显示历史"));
@@ -64,7 +64,7 @@ TrayController::TrayController(HistoryWindow *window, QObject *parent)
 
     connect(showAction, &QAction::triggered, this, [this] { m_window->showPanel(); });
     connect(pauseAction, &QAction::toggled, this, [this](bool paused) {
-        m_tray->setToolTip(paused ? tr("Clipman 已暂停记录") : tr("Clipman 剪贴板历史"));
+        m_tray->setToolTip(paused ? tr("Clipory 已暂停记录") : tr("Clipory 剪贴板历史"));
         emit pauseToggled(paused);
     });
     connect(clearAction, &QAction::triggered, this, &TrayController::clearRequested);

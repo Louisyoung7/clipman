@@ -24,7 +24,7 @@
 #include "core/Store.h"
 #include "ui/FavoriteItemDelegate.h"
 
-Q_LOGGING_CATEGORY(lcHistory, "clipman.ui.history", QtWarningMsg)
+Q_LOGGING_CATEGORY(lcHistory, "clipory.ui.history", QtWarningMsg)
 
 namespace {
 constexpr int kCollapsedTextChars = 120;

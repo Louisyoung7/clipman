@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
-# 版本号单一真源；打 tag 时 CI 用 -DCLIPMAN_VERSION=<tag 去掉 v> 覆盖。
-set(CLIPMAN_VERSION "0.6.1" CACHE STRING "Clipman 应用版本号")
+# 版本号单一真源；打 tag 时 CI 用 -DCLIPORY_VERSION=<tag 去掉 v> 覆盖。
+set(CLIPORY_VERSION "0.6.2" CACHE STRING "Clipory 应用版本号")
 
-project(Clipman VERSION ${CLIPMAN_VERSION} LANGUAGES CXX)
+project(Clipory VERSION ${CLIPORY_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,11 +18,11 @@ pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb xcb-xfixes)
 
 qt_standard_project_setup()
 
-add_library(clipman_warnings INTERFACE)
-target_compile_options(clipman_warnings INTERFACE -Wall -Wextra -Wpedantic)
+add_library(clipory_warnings INTERFACE)
+target_compile_options(clipory_warnings INTERFACE -Wall -Wextra -Wpedantic)
 
 # 纯核心逻辑（存储、blob、捕获处理），不依赖 Widgets，供主程序与测试共用。
-qt_add_library(clipman_core STATIC
+qt_add_library(clipory_core STATIC
     src/core/ClipboardItem.h
     src/core/ClipboardItem.cpp
     src/core/BlobStore.h
@@ -35,11 +35,11 @@ qt_add_library(clipman_core STATIC
     src/core/UpdateChecker.h
     src/core/UpdateChecker.cpp
 )
-target_include_directories(clipman_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(clipman_core PUBLIC Qt6::Gui Qt6::Sql Qt6::Concurrent Qt6::Network)
-target_link_libraries(clipman_core PRIVATE clipman_warnings)
+target_include_directories(clipory_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(clipory_core PUBLIC Qt6::Gui Qt6::Sql Qt6::Concurrent Qt6::Network)
+target_link_libraries(clipory_core PRIVATE clipory_warnings)
 
-qt_add_executable(clipman
+qt_add_executable(clipory
     src/main.cpp
     src/platform/ClipboardSource.h
     src/platform/ClipboardWatcher.h
@@ -64,17 +64,17 @@ qt_add_executable(clipman
     src/ui/TrayController.cpp
 )
 
-target_include_directories(clipman PRIVATE src)
-target_compile_definitions(clipman PRIVATE CLIPMAN_VERSION="${PROJECT_VERSION}")
+target_include_directories(clipory PRIVATE src)
+target_compile_definitions(clipory PRIVATE CLIPORY_VERSION="${PROJECT_VERSION}")
 
-qt_add_resources(clipman "clipman_icons"
+qt_add_resources(clipory "clipory_icons"
     PREFIX "/icons"
     BASE resources/icons
-    FILES resources/icons/clipman.svg)
+    FILES resources/icons/clipory.svg)
 
-target_link_libraries(clipman PRIVATE
-    clipman_core
-    clipman_warnings
+target_link_libraries(clipory PRIVATE
+    clipory_core
+    clipory_warnings
     Qt6::Widgets
     Qt6::DBus
     PkgConfig::XCB
@@ -83,20 +83,20 @@ target_link_libraries(clipman PRIVATE
 include(GNUInstallDirs)
 
 # 系统级自启项必须落在 /etc（XDG_CONFIG_DIRS），不能跟着 /usr 前缀走。
-set(CLIPMAN_AUTOSTART_DIR "/etc/xdg/autostart" CACHE PATH "系统级开机自启目录")
+set(CLIPORY_AUTOSTART_DIR "/etc/xdg/autostart" CACHE PATH "系统级开机自启目录")
 
-install(TARGETS clipman RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES packaging/clipman.desktop
+install(TARGETS clipory RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES packaging/clipory.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES resources/icons/clipman.svg
+install(FILES resources/icons/clipory.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
-install(FILES packaging/clipman-autostart.desktop
-        DESTINATION ${CLIPMAN_AUTOSTART_DIR})
+install(FILES packaging/clipory-autostart.desktop
+        DESTINATION ${CLIPORY_AUTOSTART_DIR})
 
 set(CPACK_GENERATOR "DEB")
-set(CPACK_PACKAGE_NAME "clipman")
-set(CPACK_PACKAGE_VENDOR "clipman")
-set(CPACK_PACKAGE_CONTACT "clipman@localhost")
+set(CPACK_PACKAGE_NAME "clipory")
+set(CPACK_PACKAGE_VENDOR "clipory")
+set(CPACK_PACKAGE_CONTACT "clipory@localhost")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "X11 剪贴板历史工具")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
@@ -109,10 +109,10 @@ libqt6sql6-sqlite, libqt6dbus6t64, libqt6concurrent6t64, libqt6svg6, libqt6netwo
 libxcb1, libxcb-xfixes0, libxfixes3")
 
 execute_process(COMMAND dpkg --print-architecture
-                OUTPUT_VARIABLE CLIPMAN_DEB_ARCH
+                OUTPUT_VARIABLE CLIPORY_DEB_ARCH
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(CLIPMAN_DEB_ARCH)
-    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CLIPMAN_DEB_ARCH}")
+if(CLIPORY_DEB_ARCH)
+    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CLIPORY_DEB_ARCH}")
 endif()
 
 include(CPack)

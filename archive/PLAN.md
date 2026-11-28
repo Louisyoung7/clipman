@@ -1,4 +1,4 @@
-# Clipman 开发规划
+# Clipory 开发规划
 
 > 本文是项目的实施路线图：记"接下来做什么、做到什么程度算完成"。技术选型的依据、模块必需性与系统依赖清单见附录 A。
 
@@ -101,7 +101,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 - [x] `tests/` + Catch2（`core/`）+ QtTest（`ui/`），`enable_testing()` 接入 CTest
 - [x] `.clang-format` / `.clang-tidy`，构建零警告
 - [x] 打包资源：`.desktop` 文件、应用图标、系统级 `/etc/xdg/autostart` 自启 + 托盘「开机自启」开关（写 `~/.config/autostart`）
-- [x] Deb 包：CPack `DEB` 生成 `clipman_0.1.0_amd64.deb`（`dpkg-buildpackage` 依赖 debhelper，本机不可用；AppImage 按决策延后）
+- [x] Deb 包：CPack `DEB` 生成 `clipory_0.1.0_amd64.deb`（`dpkg-buildpackage` 依赖 debhelper，本机不可用；AppImage 按决策延后）
 
 验收：`ctest` 全绿；安装后应用菜单可见、开机自启、卸载不残留数据目录外的文件。
 
@@ -188,7 +188,7 @@ Ubuntu 24.04 / X11 下常驻托盘的剪贴板历史工具：
 | 能力 | 机制 |
 | --- | --- |
 | 托盘 | `QSystemTrayIcon` + `QIcon::fromTheme`（带内置 fallback） |
-| 单实例 | `QLockFile`，或 `QDBusConnection` 注册 `org.clipman.Clipman` |
+| 单实例 | `QLockFile`，或 `QDBusConnection` 注册 `org.clipory.Clipory` |
 | 全局快捷键 | 首选 Global Shortcuts portal（xdg-desktop-portal）；X11 下用 xcb grab 兜底 |
 | 通知 | `org.freedesktop.Notifications` via D-Bus |
 | 自启 | `~/.config/autostart/*.desktop` |

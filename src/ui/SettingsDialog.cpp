@@ -84,7 +84,7 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier,
     , m_hotkeyApplier(hotkeyApplier)
     , m_settingsHotkeyApplier(settingsHotkeyApplier)
 {
-    setWindowTitle(tr("Clipman 设置"));
+    setWindowTitle(tr("Clipory 设置"));
     setMinimumWidth(460);
 
     auto *layout = new QVBoxLayout(this);
@@ -93,7 +93,7 @@ SettingsDialog::SettingsDialog(QWidget *parent, HotkeyApplier hotkeyApplier,
     auto *generalLayout = new QVBoxLayout(generalGroup);
     auto *generalForm = new QFormLayout;
 
-    m_autostartCheck = new QCheckBox(tr("开机时自动启动 Clipman"), generalGroup);
+    m_autostartCheck = new QCheckBox(tr("开机时自动启动 Clipory"), generalGroup);
     generalForm->addRow(m_autostartCheck);
 
     m_retentionSpin = new QSpinBox(generalGroup);
@@ -552,12 +552,12 @@ void SettingsDialog::startDownload()
 {
     QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (cacheDir.isEmpty())
-        cacheDir = QDir::tempPath() + QStringLiteral("/clipman");
+        cacheDir = QDir::tempPath() + QStringLiteral("/clipory");
     const QString updateDir = QDir(cacheDir).filePath(QStringLiteral("updates"));
     QDir().mkpath(updateDir);
 
     m_downloadPath =
-        QDir(updateDir).filePath(QStringLiteral("clipman_%1_amd64.deb").arg(m_pending.version));
+        QDir(updateDir).filePath(QStringLiteral("clipory_%1_amd64.deb").arg(m_pending.version));
     QFile::remove(m_downloadPath);
 
     setBusy(true);
@@ -598,9 +598,9 @@ void SettingsDialog::startInstall()
 
                 if (status == QProcess::NormalExit && exitCode == 0) {
                     QFile::remove(m_downloadPath);
-                    setStatus(tr("更新已安装，请重新启动 Clipman。"));
+                    setStatus(tr("更新已安装，请重新启动 Clipory。"));
                     QMessageBox::information(this, tr("更新完成"),
-                                             tr("更新已安装，请退出并重新启动 Clipman。"));
+                                             tr("更新已安装，请退出并重新启动 Clipory。"));
                     return;
                 }
 

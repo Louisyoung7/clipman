@@ -19,7 +19,7 @@ namespace {
 
 QString userAgent()
 {
-    return QStringLiteral("Clipman-Updater/%1").arg(QCoreApplication::applicationVersion());
+    return QStringLiteral("Clipory-Updater/%1").arg(QCoreApplication::applicationVersion());
 }
 
 QString versionFromTag(const QString &tagName)

@@ -1,4 +1,4 @@
-# Clipman
+# Clipory
 
 [![build](https://github.com/Louisyoung7/clipman/actions/workflows/build.yml/badge.svg)](https://github.com/Louisyoung7/clipman/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -6,6 +6,8 @@
 Ubuntu 24.04 / X11 下的托盘剪贴板历史工具。后台监听 CLIPBOARD selection，把文本、图片、文件路径写入本地 SQLite；按全局快捷键唤起面板，搜索后回车即可回填。
 
 全程本地存储，无账号、无云同步。
+
+> GitHub 仓库仍沿用原地址 `Louisyoung7/clipman`，软件名称自 0.6.2 起改为 Clipory。
 
 ## 功能
 
@@ -34,7 +36,7 @@ Ubuntu 24.04 / X11 下的托盘剪贴板历史工具。后台监听 CLIPBOARD se
 
 ```bash
 sha256sum -c checksums.sha256
-sudo apt install ./clipman_<版本>_amd64.deb
+sudo apt install ./clipory_<版本>_amd64.deb
 ```
 
 ## 从源码构建
@@ -60,7 +62,7 @@ cmake --build build -j"$(nproc)"
 运行：
 
 ```bash
-./build/clipman
+./build/clipory
 ```
 
 不需要测试时，可在配置阶段加 `-DBUILD_TESTING=OFF` 省去 Catch2 依赖。
@@ -80,7 +82,7 @@ cd build
 cpack -G DEB
 ```
 
-产物为 `clipman_<版本>_amd64.deb`。版本号唯一来源是 [CMakeLists.txt](CMakeLists.txt) 中的 `CLIPMAN_VERSION`。
+产物为 `clipory_<版本>_amd64.deb`。版本号唯一来源是 [CMakeLists.txt](CMakeLists.txt) 中的 `CLIPORY_VERSION`。
 
 ## 使用
 
@@ -96,18 +98,18 @@ cpack -G DEB
 | 暂停记录 | 托盘菜单 |
 | 设置 | 托盘菜单 → 设置：快捷键、保留条数、代理、检查更新 |
 
-首次启动后程序常驻托盘。deb 包会安装系统级自启项 `/etc/xdg/autostart/clipman.desktop`，也可在托盘菜单中开关用户级自启。
+首次启动后程序常驻托盘。deb 包会安装系统级自启项 `/etc/xdg/autostart/clipory.desktop`，也可在托盘菜单中开关用户级自启。
 
 ## 数据与配置
 
 | 内容 | 路径 |
 | --- | --- |
-| 历史数据库 | `~/.local/share/clipman/history.db` |
-| 图片与缩略图 | `~/.local/share/clipman/blobs/` |
-| 配置 | `~/.config/clipman/clipman.conf` |
-| 用户级自启项 | `~/.config/autostart/clipman.desktop` |
+| 历史数据库 | `~/.local/share/clipory/clipory/history.db` |
+| 图片与缩略图 | `~/.local/share/clipory/clipory/blobs/` |
+| 配置 | `~/.config/clipory/clipory.conf` |
+| 用户级自启项 | `~/.config/autostart/clipory.desktop` |
 
-数据全部保存在本机，删除上述目录即可完全清除。
+数据全部保存在本机，删除上述目录即可完全清除。旧版本 Clipman 的历史与配置会在首次启动时自动迁移到上述路径。
 
 ## 项目结构
 
@@ -131,7 +133,7 @@ resources/      图标
 
 ## 持续集成
 
-[build.yml](.github/workflows/build.yml) 在 `ubuntu-24.04` 上完成构建、单元测试、deb 打包与 SHA256 校验文件生成。推送 `v*` 标签时，标签名必须与 `CLIPMAN_VERSION` 一致，否则构建失败。
+[build.yml](.github/workflows/build.yml) 在 `ubuntu-24.04` 上完成构建、单元测试、deb 打包与 SHA256 校验文件生成。推送 `v*` 标签时，标签名必须与 `CLIPORY_VERSION` 一致，否则构建失败。
 
 ## 许可证
 

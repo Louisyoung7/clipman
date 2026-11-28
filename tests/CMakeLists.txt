@@ -2,7 +2,7 @@ include(Catch)
 
 add_executable(tst_core core/main.cpp core/tst_store.cpp core/tst_blobstore.cpp
                         core/tst_update_checker.cpp)
-target_link_libraries(tst_core PRIVATE clipman_core Catch2::Catch2 clipman_warnings)
+target_link_libraries(tst_core PRIVATE clipory_core Catch2::Catch2 clipory_warnings)
 catch_discover_tests(tst_core)
 
 foreach(name capture_service history_window autostart)
@@ -15,7 +15,7 @@ endforeach()
 # 被测的 UI / 桌面集成源文件直接编进对应测试目标，产品结构不变。
 target_sources(tst_history_window PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/HistoryWindow.cpp
                                         ${CMAKE_SOURCE_DIR}/src/ui/FavoriteItemDelegate.cpp)
-target_link_libraries(tst_history_window PRIVATE clipman_core Qt6::Widgets Qt6::Test)
+target_link_libraries(tst_history_window PRIVATE clipory_core Qt6::Widgets Qt6::Test)
 
 target_sources(tst_autostart PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/Autostart.cpp)
 target_link_libraries(tst_autostart PRIVATE Qt6::Test)
@@ -27,4 +27,4 @@ target_sources(tst_hotkey_spec PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/HotkeySp
 target_link_libraries(tst_hotkey_spec PRIVATE Qt6::Gui Qt6::Test)
 add_test(NAME tst_hotkey_spec COMMAND tst_hotkey_spec)
 
-target_link_libraries(tst_capture_service PRIVATE clipman_core Qt6::Concurrent Qt6::Test)
+target_link_libraries(tst_capture_service PRIVATE clipory_core Qt6::Concurrent Qt6::Test)

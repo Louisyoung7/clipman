@@ -71,7 +71,7 @@ bool Store::migrate(QString *error)
     versionQuery.finish();
 
     if (version > kSchemaVersion) {
-        setError(error, QStringLiteral("数据版本 %1 高于当前程序支持的 %2，请升级 Clipman 后再打开")
+        setError(error, QStringLiteral("数据版本 %1 高于当前程序支持的 %2，请升级 Clipory 后再打开")
                             .arg(version)
                             .arg(kSchemaVersion));
         return false;

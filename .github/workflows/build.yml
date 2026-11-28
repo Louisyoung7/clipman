@@ -41,7 +41,7 @@ jobs:
         run: |
           args=(-DCMAKE_BUILD_TYPE=Release)
           if [[ -n "${{ steps.version.outputs.value }}" ]]; then
-            args+=("-DCLIPMAN_VERSION=${{ steps.version.outputs.value }}")
+            args+=("-DCLIPORY_VERSION=${{ steps.version.outputs.value }}")
           fi
           cmake -S . -B build "${args[@]}"
 
@@ -60,8 +60,8 @@ jobs:
 
       - name: 校验 desktop 文件
         run: |
-          desktop-file-validate packaging/clipman.desktop
-          desktop-file-validate packaging/clipman-autostart.desktop
+          desktop-file-validate packaging/clipory.desktop
+          desktop-file-validate packaging/clipory-autostart.desktop
 
       - name: 打包 deb
         run: cpack --config build/CPackConfig.cmake -B build/package
@@ -77,8 +77,8 @@ jobs:
             echo "::error::deb 版本 $deb_version 与 tag 不一致"
             exit 1
           fi
-          dpkg-deb -x "$deb" /tmp/clipman-root
-          if readelf -d /tmp/clipman-root/usr/bin/clipman | grep -qi runpath; then
+          dpkg-deb -x "$deb" /tmp/clipory-root
+          if readelf -d /tmp/clipory-root/usr/bin/clipory | grep -qi runpath; then
             echo '::error::deb 内二进制仍带 RUNPATH'
             exit 1
           fi
@@ -93,7 +93,7 @@ jobs:
       - name: 上传 deb
         uses: actions/upload-artifact@v4
         with:
-          name: clipman-deb
+          name: clipory-deb
           path: |
             build/package/*.deb
             build/package/checksums.sha256

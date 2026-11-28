@@ -2,7 +2,7 @@
 
 #include <QString>
 
-// 用户级开机自启开关：写 ~/.config/autostart/clipman.desktop 覆盖
+// 用户级开机自启开关：写 ~/.config/autostart/clipory.desktop 覆盖
 // /etc/xdg/autostart 里的系统级条目（Hidden=true 即屏蔽）。只依赖 QtCore。
 class Autostart
 {

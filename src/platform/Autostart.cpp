@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr auto kSystemAutostartFile = "/etc/xdg/autostart/clipman.desktop";
+constexpr auto kSystemAutostartFile = "/etc/xdg/autostart/clipory.desktop";
 
 void setError(QString *error, const QString &message)
 {
@@ -21,10 +21,10 @@ QByteArray desktopFile(bool enabled)
 {
     return QStringLiteral("[Desktop Entry]\n"
                           "Type=Application\n"
-                          "Name=Clipman\n"
+                          "Name=Clipory\n"
                           "Comment=剪贴板历史工具\n"
-                          "Exec=clipman\n"
-                          "Icon=clipman\n"
+                          "Exec=clipory\n"
+                          "Icon=clipory\n"
                           "Terminal=false\n"
                           "NoDisplay=true\n"
                           "Hidden=%1\n"
@@ -41,7 +41,7 @@ Autostart::Autostart(QString userDir, QString systemFile)
     if (userDir.isEmpty())
         userDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
                   QStringLiteral("/autostart");
-    m_userFile = userDir + QStringLiteral("/clipman.desktop");
+    m_userFile = userDir + QStringLiteral("/clipory.desktop");
     m_systemFile = systemFile.isEmpty() ? QString::fromLatin1(kSystemAutostartFile) : systemFile;
 }
 

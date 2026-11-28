@@ -7,8 +7,8 @@
 
 namespace {
 
-constexpr auto kServiceName = "org.clipman.Clipman";
-constexpr auto kObjectPath = "/Clipman";
+constexpr auto kServiceName = "org.clipory.Clipory";
+constexpr auto kObjectPath = "/Clipory";
 
 } // namespace
 
@@ -43,7 +43,7 @@ bool SingleInstance::tryBecomePrimary()
     }
 
     // 无 session bus（精简环境/无桌面会话）时退回锁文件。
-    m_lock = std::make_unique<QLockFile>(m_dataDir + QStringLiteral("/clipman.lock"));
+    m_lock = std::make_unique<QLockFile>(m_dataDir + QStringLiteral("/clipory.lock"));
     return m_lock->tryLock(0);
 }
 

@@ -12,7 +12,7 @@ class QLockFile;
 class SingleInstance : public QObject
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "org.clipman.Clipman")
+    Q_CLASSINFO("D-Bus Interface", "org.clipory.Clipory")
 
 public:
     explicit SingleInstance(const QString &dataDir, QObject *parent = nullptr);

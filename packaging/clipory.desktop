@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Clipman
+Name=Clipory
 GenericName=Clipboard Manager
 Comment=剪贴板历史工具
-Exec=clipman
-Icon=clipman
+Exec=clipory
+Icon=clipory
 Terminal=false
 Categories=Utility;
 Keywords=clipboard;paste;history;

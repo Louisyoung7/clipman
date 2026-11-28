@@ -2,10 +2,13 @@
 #include <QClipboard>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QIcon>
 #include <QImage>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
@@ -24,16 +27,69 @@
 #include "ui/SettingsDialog.h"
 #include "ui/TrayController.h"
 
+namespace {
+
+// 旧版本以 clipman 同时作为组织名与应用名；改名后把已有数据搬到 clipory 路径，
+// 避免用户历史与配置丢失。只在目标不存在时迁移，失败时保留原目录并继续启动。
+void migrateLegacyData()
+{
+    const QString configRoot = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    const QString dataRoot =
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+
+    const QString oldConfig = configRoot + QStringLiteral("/clipman");
+    const QString newConfig = configRoot + QStringLiteral("/clipory");
+    if (QFileInfo::exists(oldConfig) && !QFileInfo::exists(newConfig)) {
+        if (!QDir().rename(oldConfig, newConfig)) {
+            qWarning() << "迁移旧配置目录失败:" << oldConfig;
+        } else {
+            const QString oldSettings = newConfig + QStringLiteral("/clipman.conf");
+            const QString newSettings = newConfig + QStringLiteral("/clipory.conf");
+            if (QFileInfo::exists(oldSettings) && !QFileInfo::exists(newSettings) &&
+                !QFile::rename(oldSettings, newSettings))
+                qWarning() << "迁移旧配置文件失败:" << oldSettings;
+        }
+    }
+
+    const QString oldData = dataRoot + QStringLiteral("/clipman/clipman");
+    const QString newData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (QFileInfo::exists(oldData) && !QFileInfo::exists(newData)) {
+        if (!QDir().mkpath(QFileInfo(newData).absolutePath()) || !QDir().rename(oldData, newData))
+            qWarning() << "迁移旧数据目录失败:" << oldData;
+    }
+
+    const QString oldAutostart = configRoot + QStringLiteral("/autostart/clipman.desktop");
+    const QString newAutostart = configRoot + QStringLiteral("/autostart/clipory.desktop");
+    if (QFileInfo::exists(oldAutostart) && !QFileInfo::exists(newAutostart)) {
+        QFile file(oldAutostart);
+        if (file.open(QIODevice::ReadOnly)) {
+            QByteArray content = file.readAll();
+            file.close();
+            content.replace("clipman", "clipory");
+            QSaveFile saved(newAutostart);
+            if (saved.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                saved.write(content) == content.size() && saved.commit())
+                QFile::remove(oldAutostart);
+            else
+                qWarning() << "迁移旧自启项失败:" << oldAutostart;
+        }
+    }
+}
+
+} // namespace
+
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    QApplication::setOrganizationName(QStringLiteral("clipman"));
-    QApplication::setApplicationName(QStringLiteral("clipman"));
-    QApplication::setApplicationVersion(QStringLiteral(CLIPMAN_VERSION));
-    QApplication::setApplicationDisplayName(QStringLiteral("Clipman"));
-    QApplication::setDesktopFileName(QStringLiteral("clipman"));
-    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/clipman.svg")));
+    QApplication::setOrganizationName(QStringLiteral("clipory"));
+    QApplication::setApplicationName(QStringLiteral("clipory"));
+    QApplication::setApplicationVersion(QStringLiteral(CLIPORY_VERSION));
+    QApplication::setApplicationDisplayName(QStringLiteral("Clipory"));
+    QApplication::setDesktopFileName(QStringLiteral("clipory"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/clipory.svg")));
     QApplication::setQuitOnLastWindowClosed(false);
+
+    migrateLegacyData();
 
     const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (dataDir.isEmpty() || !QDir().mkpath(dataDir)) {
@@ -50,7 +106,7 @@ int main(int argc, char *argv[])
     Store store;
     QString error;
     if (!store.open(dataDir + QStringLiteral("/history.db"), &error)) {
-        QMessageBox::critical(nullptr, QStringLiteral("Clipman"),
+        QMessageBox::critical(nullptr, QStringLiteral("Clipory"),
                               QStringLiteral("打开历史数据库失败：%1").arg(error));
         return 1;
     }

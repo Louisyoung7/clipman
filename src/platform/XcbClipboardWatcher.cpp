@@ -18,7 +18,7 @@ constexpr int kTimeoutMs = 2000;
 constexpr int kSuppressTimeoutMs = 1500;
 constexpr int kMaxBytes = 32 * 1024 * 1024;
 constexpr auto kClipboardName = "CLIPBOARD";
-constexpr auto kPropertyName = "CLIPMAN_SELECTION";
+constexpr auto kPropertyName = "CLIPORY_SELECTION";
 
 } // namespace
 

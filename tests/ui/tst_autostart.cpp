@@ -25,7 +25,7 @@ void TestAutostart::disabledWhenNoFiles()
     QVERIFY(temp.isValid());
 
     Autostart autostart(temp.path() + QStringLiteral("/config"),
-                        temp.path() + QStringLiteral("/system/clipman.desktop"));
+                        temp.path() + QStringLiteral("/system/clipory.desktop"));
     QVERIFY(!autostart.isEnabled());
 }
 
@@ -35,7 +35,7 @@ void TestAutostart::enableWritesVisibleEntry()
     QVERIFY(temp.isValid());
 
     Autostart autostart(temp.path() + QStringLiteral("/config"),
-                        temp.path() + QStringLiteral("/system/clipman.desktop"));
+                        temp.path() + QStringLiteral("/system/clipory.desktop"));
     QVERIFY(autostart.setEnabled(true));
     QVERIFY(QFileInfo::exists(autostart.userFilePath()));
 
@@ -51,7 +51,7 @@ void TestAutostart::disableRemovesEntryWithoutSystemFile()
     QVERIFY(temp.isValid());
 
     Autostart autostart(temp.path() + QStringLiteral("/config"),
-                        temp.path() + QStringLiteral("/system/clipman.desktop"));
+                        temp.path() + QStringLiteral("/system/clipory.desktop"));
     QVERIFY(autostart.setEnabled(true));
     QVERIFY(autostart.setEnabled(false));
 
@@ -64,7 +64,7 @@ void TestAutostart::disableHidesSystemEntry()
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
 
-    const QString systemFile = temp.path() + QStringLiteral("/system/clipman.desktop");
+    const QString systemFile = temp.path() + QStringLiteral("/system/clipory.desktop");
     QVERIFY(QDir().mkpath(QFileInfo(systemFile).absolutePath()));
     QFile file(systemFile);
     QVERIFY(file.open(QIODevice::WriteOnly));

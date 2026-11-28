@@ -17,6 +17,7 @@
 
 #include "core/CaptureService.h"
 #include "core/Store.h"
+#include "platform/Autostart.h"
 #include "platform/ClipboardSource.h"
 #include "platform/ClipboardWatcher.h"
 #include "platform/HotkeySpec.h"
@@ -74,6 +75,10 @@ void migrateLegacyData()
                 qWarning() << "迁移旧自启项失败:" << oldAutostart;
         }
     }
+
+    // 系统级自启项已经装上时，残留的用户级副本会让登录时启动两个实例（单实例会踢掉一个，
+    // 但那次进程仍会白跑一遍初始化）。
+    Autostart::removeRedundantUserEntry();
 }
 
 } // namespace
@@ -237,8 +242,7 @@ int main(int argc, char *argv[])
             hotkey->release();
         if (settingsHotkey)
             settingsHotkey->release();
-        if (window.isVisible())
-            window.hide();
+        window.hidePanel();
 
         // 不设置父窗口：GNOME 的 attach-modal-dialogs 会把模态对话框
         // 贴到父窗口所在屏幕，多屏时容易跑到副屏。位置由对话框自身按鼠标定位。
@@ -272,12 +276,9 @@ int main(int argc, char *argv[])
 
     source->start();
 
-    if (tray.isAvailable()) {
-        tray.show();
-    } else {
-        qWarning() << "系统托盘不可用，改为直接显示主窗口";
-        window.showPanel();
-    }
+    // 托盘不可用时不再自动弹面板：开机打扰，而且被随手关掉后容易落入“唤不起来”的状态。
+    // 起不来时 TrayController 内部会重试，最终失败只记一条日志，用户仍可用快捷键或重启进程唤起。
+    tray.show();
 
     return app.exec();
 }

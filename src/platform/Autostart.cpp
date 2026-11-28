@@ -1,15 +1,32 @@
 #include "platform/Autostart.h"
 
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringList>
 
 namespace {
 
-constexpr auto kSystemAutostartFile = "/etc/xdg/autostart/clipory.desktop";
+// deb 安装的是 clipory-autostart.desktop（见 CMakeLists.txt 的 install 规则）；
+// 旧版本/手工安装可能留下 clipory.desktop，两者都认。
+QStringList candidateFiles()
+{
+    return {QStringLiteral("/etc/xdg/autostart/clipory-autostart.desktop"),
+            QStringLiteral("/etc/xdg/autostart/clipory.desktop")};
+}
+
+bool anyExists(const QStringList &files)
+{
+    for (const QString &path : files) {
+        if (QFileInfo::exists(path))
+            return true;
+    }
+    return false;
+}
 
 void setError(QString *error, const QString &message)
 {
@@ -42,7 +59,37 @@ Autostart::Autostart(QString userDir, QString systemFile)
         userDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
                   QStringLiteral("/autostart");
     m_userFile = userDir + QStringLiteral("/clipory.desktop");
-    m_systemFile = systemFile.isEmpty() ? QString::fromLatin1(kSystemAutostartFile) : systemFile;
+    m_systemFile = systemFile.isEmpty() ? defaultSystemFile() : systemFile;
+}
+
+QString Autostart::defaultSystemFile()
+{
+    for (const QString &path : systemAutostartFiles()) {
+        if (QFileInfo::exists(path))
+            return path;
+    }
+    // 都没安装时返回约定的正式名字，isEnabled() 会因文件不存在而为 false。
+    return systemAutostartFiles().first();
+}
+
+QStringList Autostart::systemAutostartFiles()
+{
+    return candidateFiles();
+}
+
+void Autostart::removeRedundantUserEntry(const QString &userDir, const QStringList &systemFiles)
+{
+    const Autostart autostart(userDir);
+    if (!anyExists(systemFiles.isEmpty() ? systemAutostartFiles() : systemFiles) ||
+        !QFileInfo::exists(autostart.m_userFile))
+        return;
+
+    const QSettings settings(autostart.m_userFile, QSettings::IniFormat);
+    if (settings.value(QStringLiteral("Desktop Entry/Hidden"), false).toBool())
+        return; // 用户显式关过自启，这条屏蔽项要留着
+
+    if (!QFile::remove(autostart.m_userFile))
+        qWarning() << "清理重复的开机自启项失败:" << autostart.m_userFile;
 }
 
 bool Autostart::isEnabled() const

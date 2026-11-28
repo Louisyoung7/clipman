@@ -1,16 +1,23 @@
 #include "ui/TrayController.h"
 
 #include <QColor>
+#include <QDebug>
 #include <QIcon>
 #include <QMenu>
 #include <QPainter>
 #include <QPixmap>
 #include <QSignalBlocker>
 #include <QSystemTrayIcon>
+#include <QTimer>
 
 #include "ui/HistoryWindow.h"
 
 namespace {
+
+// GNOME 的托盘宿主（AppIndicator 扩展等）常常比自启程序晚就绪，
+// 开机时第一次查询多半是“不可用”，过几秒才会注册；重试几次再放弃。
+constexpr int kTrayRetryIntervalMs = 2000;
+constexpr int kTrayRetryCount = 5;
 
 QIcon fallbackIcon()
 {
@@ -86,5 +93,32 @@ bool TrayController::isAvailable() const
 
 void TrayController::show()
 {
-    m_tray->show();
+    if (isAvailable()) {
+        m_tray->show();
+        return;
+    }
+
+    if (!m_retryTimer) {
+        m_retryTimer = new QTimer(this);
+        m_retryTimer->setInterval(kTrayRetryIntervalMs);
+        connect(m_retryTimer, &QTimer::timeout, this, &TrayController::retryShow);
+    }
+    m_retriesLeft = kTrayRetryCount;
+    m_retryTimer->start();
+}
+
+void TrayController::retryShow()
+{
+    if (isAvailable()) {
+        m_retryTimer->stop();
+        m_tray->show();
+        return;
+    }
+
+    if (--m_retriesLeft > 0)
+        return;
+
+    // 彻底没有托盘时仍然常驻：用全局快捷键或重复启动来唤起面板。
+    m_retryTimer->stop();
+    qWarning() << "系统托盘不可用，仅支持快捷键与重复启动唤起";
 }

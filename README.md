@@ -98,7 +98,7 @@ cpack -G DEB
 | 暂停记录 | 托盘菜单 |
 | 设置 | 托盘菜单 → 设置：快捷键、保留条数、代理、检查更新 |
 
-首次启动后程序常驻托盘。deb 包会安装系统级自启项 `/etc/xdg/autostart/clipory.desktop`，也可在托盘菜单中开关用户级自启。
+首次启动后程序常驻托盘，开机时不会主动弹出面板，需要时按全局快捷键唤起。deb 包会安装系统级自启项 `/etc/xdg/autostart/clipory-autostart.desktop`，托盘菜单里的「开机自启」开关在系统级条目存在时通过 `Hidden=true` 屏蔽，不再另写用户级条目。
 
 ## 数据与配置
 
@@ -107,7 +107,7 @@ cpack -G DEB
 | 历史数据库 | `~/.local/share/clipory/clipory/history.db` |
 | 图片与缩略图 | `~/.local/share/clipory/clipory/blobs/` |
 | 配置 | `~/.config/clipory/clipory.conf` |
-| 用户级自启项 | `~/.config/autostart/clipory.desktop` |
+| 用户级自启项 | `~/.config/autostart/clipory.desktop`（仅系统级条目不存在时创建） |
 
 数据全部保存在本机，删除上述目录即可完全清除。旧版本 Clipman 的历史与配置会在首次启动时自动迁移到上述路径。
 
@@ -127,6 +127,7 @@ resources/      图标
 ## 已知限制
 
 - 仅支持 X11；Wayland 下既无法可靠读取其他应用的剪贴板，也无法注册全局快捷键
+- 托盘宿主（GNOME 需 AppIndicator 扩展）可能比程序晚就绪：启动后会重试约 10 秒，仍不可用则没有托盘图标，此时只能用全局快捷键或再次启动程序来唤起面板
 - INCR 单块传输超时 2 秒，超大内容可能被静默丢弃
 - 图片按编码后的字节哈希去重，同一图片的不同编码会存为两条
 - 更新检查使用未认证的 GitHub API，每小时 60 次配额用尽时自动改用网页接口兜底

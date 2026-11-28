@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QScreen>
+#include <QShowEvent>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -29,6 +30,9 @@ Q_LOGGING_CATEGORY(lcHistory, "clipory.ui.history", QtWarningMsg)
 namespace {
 constexpr int kCollapsedTextChars = 120;
 constexpr int kExpandedTextChars = 2000;
+// 显示后的短暂窗口期内忽略失活：WM 拿到焦点前会先报告一次“未激活”，
+// 直接响应会把刚弹出的面板立刻关掉。
+constexpr qint64 kAutoHideGraceMs = 200;
 }
 
 HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
@@ -36,7 +40,10 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
     , m_store(store)
 {
     setWindowTitle(tr("剪贴板历史"));
-    setWindowFlags(Qt::Popup);
+    // 不能再用 Qt::Popup：override-redirect 窗口拿不到键盘焦点（activateWindow() 无效，
+    // 搜索框无法直接输入），且被外部关闭后 Qt 会保留错误可见性，导致 show() 不再映射窗口。
+    // 改为受 WM 管理的无边框置顶工具窗，失焦隐藏由 maybeAutoHide() 自己实现。
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     resize(520, 480);
 
     const QString tabStyle = QStringLiteral(
@@ -141,11 +148,19 @@ HistoryWindow::HistoryWindow(Store &store, QWidget *parent)
         QMenu menu(this);
         QAction *copyAction = menu.addAction(tr("复制"));
         QAction *deleteAction = menu.addAction(tr("删除"));
+        // 菜单自身是弹窗，弹出期间面板会短暂失活，不能当作“点击外部”处理。
+        m_autoHideSuppressed = true;
         QAction *chosen = menu.exec(m_list->viewport()->mapToGlobal(pos));
-        if (chosen == copyAction)
+        m_autoHideSuppressed = false;
+        if (chosen == copyAction) {
             activateCurrent();
-        else if (chosen == deleteAction)
+        } else if (chosen == deleteAction) {
             deleteCurrent();
+        } else {
+            // 菜单取消后重新夺回激活，避免面板处于“可见但失活”的半开状态。
+            raise();
+            activateWindow();
+        }
     });
 
     m_search->installEventFilter(this);
@@ -282,16 +297,27 @@ void HistoryWindow::showPanel()
         move(pos);
     }
 
+    // 兜底：先复位再显示。任何残留的可见状态都会让下一次 show() 变成空操作。
+    if (isVisible())
+        hide();
+
     show();
     raise();
     activateWindow();
     m_search->setFocus();
 }
 
-void HistoryWindow::togglePanel()
+void HistoryWindow::hidePanel()
 {
     if (isVisible())
         hide();
+    m_panelShown = false;
+}
+
+void HistoryWindow::togglePanel()
+{
+    if (m_panelShown)
+        hidePanel();
     else
         showPanel();
 }
@@ -322,7 +348,7 @@ bool HistoryWindow::eventFilter(QObject *watched, QEvent *event)
         deleteCurrent();
         return true;
     case Qt::Key_Escape:
-        hide();
+        hidePanel();
         return true;
     default:
         break;
@@ -331,18 +357,56 @@ bool HistoryWindow::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+void HistoryWindow::changeEvent(QEvent *event)
+{
+    // 取代 Qt::Popup 的“点面板外部自动关闭”：面板已显示且失去激活时才收起来。
+    if (event->type() == QEvent::ActivationChange && m_panelShown && !isActiveWindow())
+        maybeAutoHide();
+    QWidget::changeEvent(event);
+}
+
+void HistoryWindow::maybeAutoHide()
+{
+    if (!m_panelShown || m_autoHideSuppressed)
+        return;
+    if (QDateTime::currentMSecsSinceEpoch() - m_shownAt < kAutoHideGraceMs)
+        return;
+
+    // 延后一拍再复查：WM 的焦点转移与弹窗（菜单）关闭都在同一轮事件里，
+    // 立即判断容易误关。
+    QTimer::singleShot(0, this, [this] {
+        if (!m_panelShown || m_autoHideSuppressed)
+            return;
+        if (isActiveWindow() || QApplication::activePopupWidget())
+            return;
+        hidePanel();
+    });
+}
+
+void HistoryWindow::showEvent(QShowEvent *event)
+{
+    m_panelShown = true;
+    m_shownAt = QDateTime::currentMSecsSinceEpoch();
+    QWidget::showEvent(event);
+
+    // WM 的激活有时滞后于 show()，再补一次焦点，保证唤起后能直接打字。
+    QTimer::singleShot(0, this, [this] {
+        if (m_panelShown)
+            m_search->setFocus();
+    });
+}
+
 void HistoryWindow::hideEvent(QHideEvent *event)
 {
-    qCDebug(lcHistory) << "window hide, activePopup" << QApplication::activePopupWidget()
-                       << "activeModal" << QApplication::activeModalWidget()
-                       << "focusWindow" << QGuiApplication::focusWindow();
+    m_panelShown = false;
+    qCDebug(lcHistory) << "panel hidden, visible" << isVisible() << "active" << isActiveWindow();
     QWidget::hideEvent(event);
 }
 
 void HistoryWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
-        hide();
+        hidePanel();
         return;
     }
     QWidget::keyPressEvent(event);
@@ -361,7 +425,7 @@ void HistoryWindow::activateCurrent()
         return;
 
     emit entryActivated(item->data(Qt::UserRole + 1).toLongLong());
-    hide();
+    hidePanel();
 }
 
 void HistoryWindow::deleteCurrent()

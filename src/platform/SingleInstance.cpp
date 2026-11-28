@@ -29,22 +29,29 @@ SingleInstance::~SingleInstance()
 
 bool SingleInstance::tryBecomePrimary()
 {
+    // 先抢本地锁：即使两个自启项同时拉起两个进程，也只有一个走到初始化与 grab，
+    // 另一个直接通知已有实例后退出。
+    m_lock = std::make_unique<QLockFile>(m_dataDir + QStringLiteral("/clipory.lock"));
+    if (!m_lock->tryLock(0))
+        return false;
+
     QDBusConnection bus = QDBusConnection::sessionBus();
-    if (bus.isConnected()) {
-        if (bus.registerObject(QString::fromLatin1(kObjectPath), this,
-                               QDBusConnection::ExportAllSlots)) {
-            if (bus.registerService(QString::fromLatin1(kServiceName))) {
-                m_dbusRegistered = true;
-                return true;
-            }
-            bus.unregisterObject(QString::fromLatin1(kObjectPath));
-        }
+    if (!bus.isConnected())
+        return true; // 无 session bus（精简环境）：本地锁就是最终判据
+
+    if (!bus.registerObject(QString::fromLatin1(kObjectPath), this,
+                            QDBusConnection::ExportAllSlots)) {
+        m_lock->unlock();
+        return false;
+    }
+    if (!bus.registerService(QString::fromLatin1(kServiceName))) {
+        bus.unregisterObject(QString::fromLatin1(kObjectPath));
+        m_lock->unlock();
         return false;
     }
 
-    // 无 session bus（精简环境/无桌面会话）时退回锁文件。
-    m_lock = std::make_unique<QLockFile>(m_dataDir + QStringLiteral("/clipory.lock"));
-    return m_lock->tryLock(0);
+    m_dbusRegistered = true;
+    return true;
 }
 
 bool SingleInstance::notifyExisting()

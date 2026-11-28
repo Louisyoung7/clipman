@@ -48,6 +48,9 @@ private slots:
     void starClickTogglesFavorite();
     void rapidStarClicksKeepWindowVisible();
     void favoriteTabShowsOnlyFavorites();
+    void toggleShowsPanelAfterExternalHide();
+    void showPanelTwiceStaysVisible();
+    void showPanelFocusesSearch();
 
 private:
     void seed(const QStringList &texts);
@@ -224,6 +227,46 @@ void TestHistoryWindow::favoriteTabShowsOnlyFavorites()
 
     historyTab->click();
     QCOMPARE(list->count(), 2);
+}
+
+void TestHistoryWindow::toggleShowsPanelAfterExternalHide()
+{
+    seed({QStringLiteral("alpha")});
+
+    HistoryWindow window(*m_store);
+    window.showPanel();
+    QTRY_VERIFY(window.isVisible());
+
+    // 模拟旧实现里的坏状态：面板被外部（Qt::Popup 自动关闭）收敛成隐藏，
+    // 但状态标记没对齐。下一次唤起必须一次就能显示出来。
+    window.hide();
+    QVERIFY(window.isHidden());
+
+    window.togglePanel();
+    QTRY_VERIFY(window.isVisible());
+}
+
+void TestHistoryWindow::showPanelTwiceStaysVisible()
+{
+    seed({QStringLiteral("alpha")});
+
+    HistoryWindow window(*m_store);
+    window.showPanel();
+    window.showPanel();
+
+    QVERIFY(window.isVisible());
+}
+
+void TestHistoryWindow::showPanelFocusesSearch()
+{
+    seed({QStringLiteral("alpha")});
+
+    HistoryWindow window(*m_store);
+    auto *search = window.findChild<QLineEdit *>();
+    QVERIFY(search);
+
+    window.showPanel();
+    QTRY_VERIFY(search->hasFocus());
 }
 
 QTEST_MAIN(TestHistoryWindow)

@@ -18,6 +18,7 @@ class QLineEdit;
 class QPushButton;
 class QListWidget;
 class QListWidgetItem;
+class QShowEvent;
 class Store;
 
 class HistoryWindow : public QWidget
@@ -29,6 +30,7 @@ public:
 
     void refresh(bool preserveSelection = true);
     void showPanel();
+    void hidePanel();
     void togglePanel();
 
 signals:
@@ -36,10 +38,14 @@ signals:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
     void hideEvent(QHideEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
+    // 面板被显示后失去激活即隐藏（代替 Qt::Popup 的“点外部关闭”）。
+    void maybeAutoHide();
     void activateCurrent();
     void deleteCurrent();
     void toggleTextExpansion(QListWidgetItem *item);
@@ -61,4 +67,8 @@ private:
     bool m_favoritesOnly = false;
     qint64 m_lastStarClickAt = 0;
     qint64 m_expandedId = -1;
+    // 面板可见性只以这里为准：show()/hide() 未必可靠（窗口可能被外部销毁或复位）。
+    bool m_panelShown = false;
+    qint64 m_shownAt = 0;
+    bool m_autoHideSuppressed = false;
 };

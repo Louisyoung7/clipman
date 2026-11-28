@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # 版本号单一真源；打 tag 时 CI 用 -DCLIPORY_VERSION=<tag 去掉 v> 覆盖。
-set(CLIPORY_VERSION "0.6.2" CACHE STRING "Clipory 应用版本号")
+set(CLIPORY_VERSION "0.6.3" CACHE STRING "Clipory 应用版本号")
 
 project(Clipory VERSION ${CLIPORY_VERSION} LANGUAGES CXX)
 
